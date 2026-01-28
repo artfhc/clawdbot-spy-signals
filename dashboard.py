@@ -25,26 +25,32 @@ st.set_page_config(
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_data(ticker='SPY', period='2y'):
     """Load and prepare price data."""
-    data = yf.download(ticker, period=period, progress=False)
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = data.columns.get_level_values(0)
-    
-    # Calculate indicators
-    data['MA20'] = data['Close'].rolling(20).mean()
-    data['MA50'] = data['Close'].rolling(50).mean()
-    data['MA200'] = data['Close'].rolling(200).mean()
-    data['MA200_Slope'] = data['MA200'].pct_change(periods=20)
-    
-    # RSI
-    delta = data['Close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    data['RSI'] = 100 - (100 / (1 + gain/loss))
-    
-    # Volatility
-    data['Vol'] = data['Close'].pct_change().rolling(20).std() * (252 ** 0.5)
-    
-    return data
+    try:
+        data = yf.download(ticker, period=period, progress=False)
+        if data is None or len(data) == 0:
+            return None
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        
+        # Calculate indicators
+        data['MA20'] = data['Close'].rolling(20).mean()
+        data['MA50'] = data['Close'].rolling(50).mean()
+        data['MA200'] = data['Close'].rolling(200).mean()
+        data['MA200_Slope'] = data['MA200'].pct_change(periods=20)
+        
+        # RSI
+        delta = data['Close'].diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+        data['RSI'] = 100 - (100 / (1 + gain/loss))
+        
+        # Volatility
+        data['Vol'] = data['Close'].pct_change().rolling(20).std() * (252 ** 0.5)
+        
+        return data
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return None
 
 def get_signals(row):
     """Calculate all 5 signals for a given row."""
@@ -153,6 +159,11 @@ period = st.sidebar.selectbox("Data Period", ['1y', '2y', '3y', '5y', 'max'], in
 # Load data
 with st.spinner("Loading data..."):
     data = load_data(ticker, period)
+
+if data is None or len(data) == 0:
+    st.error("⚠️ Unable to load market data. Please try again in a moment.")
+    st.info("This can happen due to API rate limits or network issues. Try refreshing the page.")
+    st.stop()
 
 latest = data.iloc[-1]
 signals = get_signals(latest)
