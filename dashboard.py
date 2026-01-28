@@ -22,7 +22,7 @@ st.set_page_config(
 # DATA & SIGNAL FUNCTIONS
 # ============================================================
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=300)
 def load_data(ticker='SPY', period='2y'):
     """Load and prepare price data."""
     try:
@@ -38,22 +38,60 @@ def load_data(ticker='SPY', period='2y'):
         data['MA200'] = data['Close'].rolling(200).mean()
         data['MA200_Slope'] = data['MA200'].pct_change(periods=20)
         
-        # RSI
+        # RSI (14-day)
         delta = data['Close'].diff()
         gain = delta.where(delta > 0, 0).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         data['RSI'] = 100 - (100 / (1 + gain/loss))
         
+        # RSI (5-day) for mean reversion
+        gain5 = delta.where(delta > 0, 0).rolling(5).mean()
+        loss5 = (-delta.where(delta < 0, 0)).rolling(5).mean()
+        data['RSI5'] = 100 - (100 / (1 + gain5/loss5))
+        
         # Volatility
         data['Vol'] = data['Close'].pct_change().rolling(20).std() * (252 ** 0.5)
+        
+        # 12-month momentum (for Dual Momentum)
+        data['Mom12M'] = data['Close'].pct_change(periods=252)
+        
+        # End of month flag
+        data['MonthEnd'] = data.index.is_month_end
         
         return data
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return None
 
+@st.cache_data(ttl=300)
+def load_intl_data(period='2y'):
+    """Load international equity data for Dual Momentum."""
+    try:
+        data = yf.download('VEU', period=period, progress=False)  # Vanguard FTSE All-World ex-US
+        if data is None or len(data) == 0:
+            return None
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        data['Mom12M'] = data['Close'].pct_change(periods=252)
+        return data
+    except:
+        return None
+
+@st.cache_data(ttl=300)
+def load_bond_data(period='2y'):
+    """Load bond data for safe haven."""
+    try:
+        data = yf.download('BND', period=period, progress=False)  # Vanguard Total Bond
+        if data is None or len(data) == 0:
+            return None
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        return data
+    except:
+        return None
+
 def get_signals(row):
-    """Calculate all 5 signals for a given row."""
+    """Calculate all 5 original signals for a given row."""
     signals = {
         'Trend Filter': (row['Close'] > row['MA50']) and (row['MA200_Slope'] > 0),
         'Golden Cross': row['MA50'] > row['MA200'],
@@ -63,47 +101,146 @@ def get_signals(row):
     }
     return signals
 
-def get_strategy_position(signals):
+def get_strategy_position(signals, row=None, intl_mom=None):
     """Get position for each strategy based on signals."""
     count = sum(signals.values())
     tf = signals['Trend Filter']
     gc = signals['Golden Cross']
     mom = signals['Momentum']
     
+    # Original strategies
     positions = {
         'Trend Rider': 1.0 if tf else 0.0,
         'Golden Boost': 1.5 if (tf and gc) else (1.0 if tf else 0.0),
         'Signal Stacker': 2.0 if count >= 5 else (1.5 if count >= 4 else (1.0 if count >= 3 else 0.0)),
         'Steady Eddie': 2.0 if count == 5 else (1.5 if count >= 4 else (1.0 if count >= 3 else 0.0)),
-        'Full Send': 2.0 if (tf and gc and mom) else 0.0
+        'Full Send': 2.0 if (tf and gc and mom) else 0.0,
     }
+    
+    # New research-backed strategies
+    if row is not None:
+        # 200 DMA Monthly - only act on month end, but show current status
+        above_200 = row['Close'] > row['MA200'] if pd.notna(row['MA200']) else False
+        positions['200 DMA Monthly'] = 1.0 if above_200 else 0.0
+        
+        # RSI Mean Reversion - buy oversold in uptrends
+        rsi5 = row['RSI5'] if 'RSI5' in row and pd.notna(row['RSI5']) else 50
+        above_200 = row['Close'] > row['MA200'] if pd.notna(row['MA200']) else False
+        if above_200 and rsi5 < 30:
+            positions['RSI Bounce'] = 1.0  # Buy signal
+        elif rsi5 > 50:
+            positions['RSI Bounce'] = 0.0  # Exit signal
+        else:
+            positions['RSI Bounce'] = 0.5  # Hold current (simplified)
+        
+        # Dual Momentum (GEM) - compare US vs International
+        spy_mom = row['Mom12M'] if pd.notna(row['Mom12M']) else 0
+        intl_mom_val = intl_mom if intl_mom is not None else 0
+        
+        if spy_mom > intl_mom_val and spy_mom > 0:
+            positions['Dual Momentum'] = 1.0  # US equities
+        elif intl_mom_val > spy_mom and intl_mom_val > 0:
+            positions['Dual Momentum'] = 0.8  # International (shown as 0.8 to distinguish)
+        else:
+            positions['Dual Momentum'] = 0.0  # Bonds/Cash
+    
     return positions, count
 
 # ============================================================
 # BACKTEST ENGINE
 # ============================================================
 
-def run_backtest(data, strategy_name, initial_capital=100000):
+def run_backtest(data, strategy_name, initial_capital=100000, intl_data=None, bond_data=None):
     """Run backtest for a specific strategy."""
     df = data.copy()
-    df = df.dropna()
+    df = df.dropna(subset=['Close', 'MA200'])
     
     # Calculate daily returns
     df['Return'] = df['Close'].pct_change()
     
+    # Prepare international data if available
+    if intl_data is not None:
+        intl_df = intl_data.copy()
+        intl_df = intl_df[['Mom12M', 'Close']].rename(columns={'Mom12M': 'Intl_Mom12M', 'Close': 'Intl_Close'})
+        intl_df['Intl_Return'] = intl_df['Intl_Close'].pct_change()
+        df = df.join(intl_df, how='left')
+    
     # Get positions for each day
     positions = []
+    position_types = []  # For Dual Momentum: 'SPY', 'INTL', 'BOND'
+    
+    # State tracking for RSI Bounce
+    rsi_in_position = False
+    
     for idx, row in df.iterrows():
         signals = get_signals(row)
-        strat_positions, _ = get_strategy_position(signals)
-        positions.append(strat_positions.get(strategy_name, 0))
+        intl_mom = row['Intl_Mom12M'] if 'Intl_Mom12M' in row and pd.notna(row['Intl_Mom12M']) else None
+        
+        if strategy_name == '200 DMA Monthly':
+            # Only change position at month end
+            if len(positions) == 0:
+                pos = 1.0 if row['Close'] > row['MA200'] else 0.0
+            elif row['MonthEnd']:
+                pos = 1.0 if row['Close'] > row['MA200'] else 0.0
+            else:
+                pos = positions[-1]
+            positions.append(pos)
+            position_types.append('SPY')
+            
+        elif strategy_name == 'RSI Bounce':
+            above_200 = row['Close'] > row['MA200']
+            rsi5 = row['RSI5'] if pd.notna(row['RSI5']) else 50
+            
+            if not rsi_in_position:
+                if above_200 and rsi5 < 30:
+                    rsi_in_position = True
+                    positions.append(1.0)
+                else:
+                    positions.append(0.0)
+            else:
+                if rsi5 > 50:
+                    rsi_in_position = False
+                    positions.append(0.0)
+                else:
+                    positions.append(1.0)
+            position_types.append('SPY')
+            
+        elif strategy_name == 'Dual Momentum':
+            spy_mom = row['Mom12M'] if pd.notna(row['Mom12M']) else 0
+            intl_mom_val = intl_mom if intl_mom is not None else 0
+            
+            if spy_mom > intl_mom_val and spy_mom > 0:
+                positions.append(1.0)
+                position_types.append('SPY')
+            elif intl_mom_val > spy_mom and intl_mom_val > 0:
+                positions.append(1.0)
+                position_types.append('INTL')
+            else:
+                positions.append(0.0)
+                position_types.append('BOND')
+        else:
+            # Original strategies
+            strat_positions, _ = get_strategy_position(signals, row, intl_mom)
+            positions.append(strat_positions.get(strategy_name, 0))
+            position_types.append('SPY')
     
     df['Position'] = positions
-    df['Position'] = df['Position'].shift(1)  # Trade on next day
-    df['Position'] = df['Position'].fillna(0)
+    df['Position_Type'] = position_types
+    df['Position'] = df['Position'].shift(1).fillna(0)
+    df['Position_Type'] = df['Position_Type'].shift(1).fillna('SPY')
     
-    # Calculate strategy returns (with leverage effect)
-    df['Strategy_Return'] = df['Position'] * df['Return']
+    # Calculate strategy returns
+    if strategy_name == 'Dual Momentum' and 'Intl_Return' in df.columns:
+        df['Strategy_Return'] = df.apply(
+            lambda r: r['Position'] * (r['Intl_Return'] if r['Position_Type'] == 'INTL' else r['Return']),
+            axis=1
+        )
+    else:
+        df['Strategy_Return'] = df['Position'] * df['Return']
+    
+    # Handle leverage for original strategies
+    if strategy_name in ['Golden Boost', 'Signal Stacker', 'Steady Eddie', 'Full Send']:
+        df['Strategy_Return'] = df['Position'] * df['Return']
     
     # Calculate cumulative returns
     df['Buy_Hold'] = (1 + df['Return']).cumprod() * initial_capital
@@ -116,15 +253,20 @@ def run_backtest(data, strategy_name, initial_capital=100000):
     strategy_total_return = (df['Strategy'].iloc[-1] / initial_capital - 1) * 100
     buyhold_total_return = (df['Buy_Hold'].iloc[-1] / initial_capital - 1) * 100
     
-    strategy_cagr = ((df['Strategy'].iloc[-1] / initial_capital) ** (1/years) - 1) * 100
-    buyhold_cagr = ((df['Buy_Hold'].iloc[-1] / initial_capital) ** (1/years) - 1) * 100
+    strategy_cagr = ((df['Strategy'].iloc[-1] / initial_capital) ** (1/years) - 1) * 100 if years > 0 else 0
+    buyhold_cagr = ((df['Buy_Hold'].iloc[-1] / initial_capital) ** (1/years) - 1) * 100 if years > 0 else 0
     
     # Max Drawdown
     rolling_max = df['Strategy'].cummax()
     drawdown = (df['Strategy'] - rolling_max) / rolling_max
     max_dd = drawdown.min() * 100
     
-    # Sharpe Ratio (assuming 4% risk-free rate)
+    # Buy & Hold Max Drawdown
+    bh_rolling_max = df['Buy_Hold'].cummax()
+    bh_drawdown = (df['Buy_Hold'] - bh_rolling_max) / bh_rolling_max
+    bh_max_dd = bh_drawdown.min() * 100
+    
+    # Sharpe Ratio
     excess_returns = df['Strategy_Return'] - 0.04/252
     sharpe = np.sqrt(252) * excess_returns.mean() / excess_returns.std() if excess_returns.std() > 0 else 0
     
@@ -133,14 +275,18 @@ def run_backtest(data, strategy_name, initial_capital=100000):
     trading_days = (df['Position'] != 0).sum()
     win_rate = (winning_days / trading_days * 100) if trading_days > 0 else 0
     
+    # Time in market
+    time_in_market = (df['Position'] > 0).mean() * 100
+    
     metrics = {
         'Total Return': f"{strategy_total_return:.1f}%",
         'CAGR': f"{strategy_cagr:.1f}%",
         'Max Drawdown': f"{max_dd:.1f}%",
         'Sharpe Ratio': f"{sharpe:.2f}",
         'Win Rate': f"{win_rate:.1f}%",
+        'Time in Market': f"{time_in_market:.1f}%",
         'Buy & Hold Return': f"{buyhold_total_return:.1f}%",
-        'Buy & Hold CAGR': f"{buyhold_cagr:.1f}%"
+        'B&H Max Drawdown': f"{bh_max_dd:.1f}%"
     }
     
     return df, metrics
@@ -159,6 +305,8 @@ period = st.sidebar.selectbox("Data Period", ['1y', '2y', '3y', '5y', 'max'], in
 # Load data
 with st.spinner("Loading data..."):
     data = load_data(ticker, period)
+    intl_data = load_intl_data(period)
+    bond_data = load_bond_data(period)
 
 if data is None or len(data) == 0:
     st.error("⚠️ Unable to load market data. Please try again in a moment.")
@@ -167,7 +315,8 @@ if data is None or len(data) == 0:
 
 latest = data.iloc[-1]
 signals = get_signals(latest)
-positions, signal_count = get_strategy_position(signals)
+intl_mom = intl_data['Mom12M'].iloc[-1] if intl_data is not None and len(intl_data) > 0 else None
+positions, signal_count = get_strategy_position(signals, latest, intl_mom)
 
 # ============================================================
 # CURRENT SIGNALS SECTION
@@ -180,9 +329,9 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("Price", f"${latest['Close']:.2f}")
 with col2:
-    st.metric("RSI", f"{latest['RSI']:.1f}")
+    st.metric("RSI (14)", f"{latest['RSI']:.1f}")
 with col3:
-    st.metric("Volatility", f"{latest['Vol']*100:.1f}%")
+    st.metric("RSI (5)", f"{latest['RSI5']:.1f}")
 with col4:
     st.metric("Signal Count", f"{signal_count}/5", 
               delta="Bullish" if signal_count >= 4 else ("Neutral" if signal_count >= 3 else "Bearish"))
@@ -202,26 +351,60 @@ for i, (name, active) in enumerate(signals.items()):
 
 st.header("📊 Strategy Positions")
 
-strategy_info = {
-    'Trend Rider': ('🟢', 'Basic trend following - long when above 50 DMA & 200 DMA rising'),
-    'Golden Boost': ('🟡', 'Adds leverage when Golden Cross confirms'),
-    'Signal Stacker': ('📊', 'Scales 1x→1.5x→2x based on signal count'),
-    'Steady Eddie': ('⭐', 'Conservative - best risk-adjusted returns'),
-    'Full Send': ('🚀', 'Aggressive - 2x when trend+cross+momentum align')
+# Separate original and new strategies
+st.subheader("Original Strategies")
+strategy_info_original = {
+    'Trend Rider': ('🟢', 'Basic trend following'),
+    'Golden Boost': ('🟡', 'Trend + Golden Cross leverage'),
+    'Signal Stacker': ('📊', 'Scales with signal count'),
+    'Steady Eddie': ('⭐', 'Conservative, best risk-adjusted'),
+    'Full Send': ('🚀', 'Aggressive max leverage')
 }
 
 strat_cols = st.columns(5)
-for i, (name, pos) in enumerate(positions.items()):
-    icon, desc = strategy_info[name]
+for i, (name, (icon, desc)) in enumerate(strategy_info_original.items()):
+    pos = positions.get(name, 0)
     with strat_cols[i]:
         if pos == 0:
             st.warning(f"{icon} **{name}**\n\n💵 CASH")
         elif pos == 1.0:
             st.info(f"{icon} **{name}**\n\n📈 1x SPY")
         elif pos == 1.5:
-            st.success(f"{icon} **{name}**\n\n📈 1.5x (50/50)")
+            st.success(f"{icon} **{name}**\n\n📈 1.5x")
         else:
             st.success(f"{icon} **{name}**\n\n🔥 2x SSO")
+
+st.subheader("Research-Backed Strategies (NEW)")
+strategy_info_new = {
+    'Dual Momentum': ('🌍', 'Gary Antonacci GEM - US vs Intl, 12mo momentum'),
+    '200 DMA Monthly': ('📅', 'Paul Tudor Jones - End of month trend filter'),
+    'RSI Bounce': ('📉', 'Mean reversion - Buy RSI<30 dips in uptrends')
+}
+
+new_cols = st.columns(3)
+for i, (name, (icon, desc)) in enumerate(strategy_info_new.items()):
+    pos = positions.get(name, 0)
+    with new_cols[i]:
+        if name == 'Dual Momentum':
+            if pos == 1.0:
+                st.success(f"{icon} **{name}**\n\n🇺🇸 US Equities (SPY)")
+            elif pos == 0.8:
+                st.info(f"{icon} **{name}**\n\n🌏 International (VEU)")
+            else:
+                st.warning(f"{icon} **{name}**\n\n🏦 Bonds (BND)")
+        elif name == 'RSI Bounce':
+            if pos == 1.0:
+                st.success(f"{icon} **{name}**\n\n🎯 BUY SIGNAL")
+            elif pos == 0.5:
+                st.info(f"{icon} **{name}**\n\n⏳ Waiting...")
+            else:
+                st.warning(f"{icon} **{name}**\n\n💵 CASH")
+        else:
+            if pos == 1.0:
+                st.success(f"{icon} **{name}**\n\n📈 LONG SPY")
+            else:
+                st.warning(f"{icon} **{name}**\n\n💵 CASH")
+        st.caption(desc)
 
 # ============================================================
 # PRICE CHART SECTION
@@ -230,36 +413,74 @@ for i, (name, pos) in enumerate(positions.items()):
 st.header("📉 Price Chart")
 
 # Strategy selector for signals on chart
-chart_strategy = st.selectbox("Show buy/sell signals for:", list(strategy_info.keys()), index=3)  # Default: Steady Eddie
+all_strategies = list(strategy_info_original.keys()) + list(strategy_info_new.keys())
+chart_strategy = st.selectbox("Show buy/sell signals for:", all_strategies, index=3)
 
 # Calculate buy/sell signals for the selected strategy
-def get_trade_signals(data, strategy_name):
+def get_trade_signals(data, strategy_name, intl_data=None):
     """Get buy and sell signal dates and prices."""
     buy_dates, buy_prices = [], []
     sell_dates, sell_prices = [], []
     
     prev_position = 0
+    rsi_in_position = False
+    
     for i, (idx, row) in enumerate(data.iterrows()):
-        if pd.isna(row['MA200']):  # Skip rows without enough data
+        if pd.isna(row['MA200']):
             continue
+            
         signals = get_signals(row)
-        strat_positions, _ = get_strategy_position(signals)
-        current_position = strat_positions.get(strategy_name, 0)
+        intl_mom = None
+        if intl_data is not None and idx in intl_data.index:
+            intl_mom = intl_data.loc[idx, 'Mom12M'] if pd.notna(intl_data.loc[idx, 'Mom12M']) else None
         
-        # Buy signal: position goes from 0 to > 0
+        # Get position based on strategy
+        if strategy_name == '200 DMA Monthly':
+            if row['MonthEnd']:
+                current_position = 1.0 if row['Close'] > row['MA200'] else 0.0
+            else:
+                current_position = prev_position
+        elif strategy_name == 'RSI Bounce':
+            above_200 = row['Close'] > row['MA200']
+            rsi5 = row['RSI5'] if pd.notna(row['RSI5']) else 50
+            if not rsi_in_position:
+                if above_200 and rsi5 < 30:
+                    rsi_in_position = True
+                    current_position = 1.0
+                else:
+                    current_position = 0.0
+            else:
+                if rsi5 > 50:
+                    rsi_in_position = False
+                    current_position = 0.0
+                else:
+                    current_position = 1.0
+        elif strategy_name == 'Dual Momentum':
+            spy_mom = row['Mom12M'] if pd.notna(row['Mom12M']) else 0
+            intl_mom_val = intl_mom if intl_mom is not None else 0
+            if spy_mom > intl_mom_val and spy_mom > 0:
+                current_position = 1.0
+            elif intl_mom_val > spy_mom and intl_mom_val > 0:
+                current_position = 0.8
+            else:
+                current_position = 0.0
+        else:
+            strat_positions, _ = get_strategy_position(signals, row, intl_mom)
+            current_position = strat_positions.get(strategy_name, 0)
+        
+        # Detect transitions
         if prev_position == 0 and current_position > 0:
             buy_dates.append(idx)
-            buy_prices.append(row['Low'] * 0.98)  # Place marker below candle
-        # Sell signal: position goes from > 0 to 0
+            buy_prices.append(row['Low'] * 0.98)
         elif prev_position > 0 and current_position == 0:
             sell_dates.append(idx)
-            sell_prices.append(row['High'] * 1.02)  # Place marker above candle
+            sell_prices.append(row['High'] * 1.02)
         
         prev_position = current_position
     
     return buy_dates, buy_prices, sell_dates, sell_prices
 
-buy_dates, buy_prices, sell_dates, sell_prices = get_trade_signals(data, chart_strategy)
+buy_dates, buy_prices, sell_dates, sell_prices = get_trade_signals(data, chart_strategy, intl_data)
 
 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                     vertical_spacing=0.05, row_heights=[0.7, 0.3])
@@ -269,9 +490,9 @@ fig.add_trace(go.Candlestick(x=data.index, open=data['Open'], high=data['High'],
                               low=data['Low'], close=data['Close'], name='Price'), row=1, col=1)
 fig.add_trace(go.Scatter(x=data.index, y=data['MA20'], name='MA20', line=dict(color='orange', width=1)), row=1, col=1)
 fig.add_trace(go.Scatter(x=data.index, y=data['MA50'], name='MA50', line=dict(color='blue', width=1)), row=1, col=1)
-fig.add_trace(go.Scatter(x=data.index, y=data['MA200'], name='MA200', line=dict(color='red', width=1)), row=1, col=1)
+fig.add_trace(go.Scatter(x=data.index, y=data['MA200'], name='MA200', line=dict(color='red', width=2)), row=1, col=1)
 
-# Buy signals (green triangles pointing up)
+# Buy signals
 fig.add_trace(go.Scatter(
     x=buy_dates, y=buy_prices,
     mode='markers',
@@ -279,7 +500,7 @@ fig.add_trace(go.Scatter(
     name='Buy Signal'
 ), row=1, col=1)
 
-# Sell signals (red triangles pointing down)
+# Sell signals
 fig.add_trace(go.Scatter(
     x=sell_dates, y=sell_prices,
     mode='markers',
@@ -288,12 +509,13 @@ fig.add_trace(go.Scatter(
 ), row=1, col=1)
 
 # RSI
-fig.add_trace(go.Scatter(x=data.index, y=data['RSI'], name='RSI', line=dict(color='purple')), row=2, col=1)
+fig.add_trace(go.Scatter(x=data.index, y=data['RSI'], name='RSI(14)', line=dict(color='purple')), row=2, col=1)
+fig.add_trace(go.Scatter(x=data.index, y=data['RSI5'], name='RSI(5)', line=dict(color='cyan', dash='dot')), row=2, col=1)
 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
 fig.update_layout(height=600, xaxis_rangeslider_visible=False)
-st.plotly_chart(fig, width="stretch")
+st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
 # BACKTEST SECTION
@@ -304,17 +526,17 @@ st.header("🔬 Backtest")
 backtest_col1, backtest_col2 = st.columns([1, 3])
 
 with backtest_col1:
-    selected_strategy = st.selectbox("Strategy", list(positions.keys()))
+    selected_strategy = st.selectbox("Strategy", all_strategies)
     initial_capital = st.number_input("Initial Capital", value=100000, step=10000)
     run_btn = st.button("Run Backtest", type="primary")
 
 if run_btn:
     with st.spinner("Running backtest..."):
-        bt_data, metrics = run_backtest(data, selected_strategy, initial_capital)
+        bt_data, metrics = run_backtest(data, selected_strategy, initial_capital, intl_data, bond_data)
     
-    # Metrics
     st.subheader(f"📈 {selected_strategy} Performance")
     
+    # Metrics in two rows
     metric_cols = st.columns(4)
     metric_items = list(metrics.items())
     for i, (name, value) in enumerate(metric_items[:4]):
@@ -333,9 +555,32 @@ if run_btn:
     fig_bt.add_trace(go.Scatter(x=bt_data.index, y=bt_data['Strategy'], 
                                  name=selected_strategy, line=dict(color='green', width=2)))
     fig_bt.add_trace(go.Scatter(x=bt_data.index, y=bt_data['Buy_Hold'], 
-                                 name='Buy & Hold', line=dict(color='blue', width=1, dash='dash')))
+                                 name='Buy & Hold SPY', line=dict(color='blue', width=1, dash='dash')))
     fig_bt.update_layout(height=400, hovermode='x unified')
-    st.plotly_chart(fig_bt, width="stretch")
+    st.plotly_chart(fig_bt, use_container_width=True)
+
+# ============================================================
+# STRATEGY COMPARISON
+# ============================================================
+
+st.header("📊 Strategy Comparison")
+
+if st.button("Compare All Strategies"):
+    with st.spinner("Running backtests for all strategies..."):
+        comparison_data = []
+        for strat in all_strategies:
+            _, metrics = run_backtest(data, strat, 100000, intl_data, bond_data)
+            comparison_data.append({
+                'Strategy': strat,
+                'Total Return': metrics['Total Return'],
+                'CAGR': metrics['CAGR'],
+                'Max Drawdown': metrics['Max Drawdown'],
+                'Sharpe': metrics['Sharpe Ratio'],
+                'Time in Market': metrics['Time in Market']
+            })
+        
+        comparison_df = pd.DataFrame(comparison_data)
+        st.dataframe(comparison_df, use_container_width=True)
 
 # ============================================================
 # FOOTER
@@ -343,3 +588,4 @@ if run_btn:
 
 st.divider()
 st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data from Yahoo Finance")
+st.caption("⚠️ This is for educational purposes only. Past performance does not guarantee future results.")
