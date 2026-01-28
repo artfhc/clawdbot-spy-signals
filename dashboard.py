@@ -229,6 +229,38 @@ for i, (name, pos) in enumerate(positions.items()):
 
 st.header("📉 Price Chart")
 
+# Strategy selector for signals on chart
+chart_strategy = st.selectbox("Show buy/sell signals for:", list(strategy_info.keys()), index=3)  # Default: Steady Eddie
+
+# Calculate buy/sell signals for the selected strategy
+def get_trade_signals(data, strategy_name):
+    """Get buy and sell signal dates and prices."""
+    buy_dates, buy_prices = [], []
+    sell_dates, sell_prices = [], []
+    
+    prev_position = 0
+    for i, (idx, row) in enumerate(data.iterrows()):
+        if pd.isna(row['MA200']):  # Skip rows without enough data
+            continue
+        signals = get_signals(row)
+        strat_positions, _ = get_strategy_position(signals)
+        current_position = strat_positions.get(strategy_name, 0)
+        
+        # Buy signal: position goes from 0 to > 0
+        if prev_position == 0 and current_position > 0:
+            buy_dates.append(idx)
+            buy_prices.append(row['Low'] * 0.98)  # Place marker below candle
+        # Sell signal: position goes from > 0 to 0
+        elif prev_position > 0 and current_position == 0:
+            sell_dates.append(idx)
+            sell_prices.append(row['High'] * 1.02)  # Place marker above candle
+        
+        prev_position = current_position
+    
+    return buy_dates, buy_prices, sell_dates, sell_prices
+
+buy_dates, buy_prices, sell_dates, sell_prices = get_trade_signals(data, chart_strategy)
+
 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                     vertical_spacing=0.05, row_heights=[0.7, 0.3])
 
@@ -238,6 +270,22 @@ fig.add_trace(go.Candlestick(x=data.index, open=data['Open'], high=data['High'],
 fig.add_trace(go.Scatter(x=data.index, y=data['MA20'], name='MA20', line=dict(color='orange', width=1)), row=1, col=1)
 fig.add_trace(go.Scatter(x=data.index, y=data['MA50'], name='MA50', line=dict(color='blue', width=1)), row=1, col=1)
 fig.add_trace(go.Scatter(x=data.index, y=data['MA200'], name='MA200', line=dict(color='red', width=1)), row=1, col=1)
+
+# Buy signals (green triangles pointing up)
+fig.add_trace(go.Scatter(
+    x=buy_dates, y=buy_prices,
+    mode='markers',
+    marker=dict(symbol='triangle-up', size=12, color='green'),
+    name='Buy Signal'
+), row=1, col=1)
+
+# Sell signals (red triangles pointing down)
+fig.add_trace(go.Scatter(
+    x=sell_dates, y=sell_prices,
+    mode='markers',
+    marker=dict(symbol='triangle-down', size=12, color='red'),
+    name='Sell Signal'
+), row=1, col=1)
 
 # RSI
 fig.add_trace(go.Scatter(x=data.index, y=data['RSI'], name='RSI', line=dict(color='purple')), row=2, col=1)
