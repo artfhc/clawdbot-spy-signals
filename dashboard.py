@@ -101,7 +101,7 @@ def get_signals(row):
     }
     return signals
 
-def get_strategy_position(signals, row=None, intl_mom=None):
+def get_strategy_position(signals, row=None, intl_mom=None, rsi_in_state=None):
     """Get position for each strategy based on signals."""
     count = sum(signals.values())
     tf = signals['Trend Filter']
@@ -119,30 +119,70 @@ def get_strategy_position(signals, row=None, intl_mom=None):
     
     # New research-backed strategies
     if row is not None:
-        # 200 DMA Monthly - only act on month end, but show current status
         above_200 = row['Close'] > row['MA200'] if pd.notna(row['MA200']) else False
+        rsi5 = row['RSI5'] if 'RSI5' in row and pd.notna(row['RSI5']) else 50
+        rsi_oversold = rsi5 < 30
+        rsi_recovered = rsi5 > 50
+        vol = row['Vol'] if 'Vol' in row and pd.notna(row['Vol']) else 0.2
+        
+        # 200 DMA Monthly
         positions['200 DMA Monthly'] = 1.0 if above_200 else 0.0
         
-        # RSI Mean Reversion - buy oversold in uptrends
-        rsi5 = row['RSI5'] if 'RSI5' in row and pd.notna(row['RSI5']) else 50
-        above_200 = row['Close'] > row['MA200'] if pd.notna(row['MA200']) else False
-        if above_200 and rsi5 < 30:
-            positions['RSI Bounce'] = 1.0  # Buy signal
-        elif rsi5 > 50:
-            positions['RSI Bounce'] = 0.0  # Exit signal
+        # RSI Bounce
+        if above_200 and rsi_oversold:
+            positions['RSI Bounce'] = 1.0
+        elif rsi_recovered:
+            positions['RSI Bounce'] = 0.0
         else:
-            positions['RSI Bounce'] = 0.5  # Hold current (simplified)
+            positions['RSI Bounce'] = 0.5
         
-        # Dual Momentum (GEM) - compare US vs International
+        # Dual Momentum
         spy_mom = row['Mom12M'] if pd.notna(row['Mom12M']) else 0
         intl_mom_val = intl_mom if intl_mom is not None else 0
-        
         if spy_mom > intl_mom_val and spy_mom > 0:
-            positions['Dual Momentum'] = 1.0  # US equities
+            positions['Dual Momentum'] = 1.0
         elif intl_mom_val > spy_mom and intl_mom_val > 0:
-            positions['Dual Momentum'] = 0.8  # International (shown as 0.8 to distinguish)
+            positions['Dual Momentum'] = 0.8
         else:
-            positions['Dual Momentum'] = 0.0  # Bonds/Cash
+            positions['Dual Momentum'] = 0.0
+        
+        # ============================================================
+        # HYBRID STRATEGIES (Tuned combinations)
+        # ============================================================
+        
+        # Hybrid B: Voting system - need 3+ signals AND above 200 DMA
+        if count >= 4 and above_200:
+            positions['Voting System'] = 1.5
+        elif count >= 3 and above_200:
+            positions['Voting System'] = 1.0
+        else:
+            positions['Voting System'] = 0.0
+        
+        # Hybrid D: Vol-adaptive position sizing
+        if tf and gc:
+            if vol < 0.15:
+                positions['Vol Adaptive'] = 2.0
+            elif vol < 0.20:
+                positions['Vol Adaptive'] = 1.5
+            elif vol < 0.25:
+                positions['Vol Adaptive'] = 1.0
+            else:
+                positions['Vol Adaptive'] = 0.5
+        elif above_200:
+            positions['Vol Adaptive'] = 0.5 if vol < 0.25 else 0.0
+        else:
+            positions['Vol Adaptive'] = 0.0
+        
+        # Hybrid F: Ensemble (Trend + RSI combined) - BEST PERFORMER
+        trend_pos = 1.0 if tf else 0.0
+        rsi_pos = 1.0 if (above_200 and rsi_oversold) else (0.0 if rsi_recovered else 0.5)
+        
+        if trend_pos > 0 and rsi_pos >= 1.0:
+            positions['Ensemble'] = 1.5  # Both agree strongly
+        elif trend_pos > 0 or rsi_pos >= 1.0:
+            positions['Ensemble'] = 1.0  # Either says buy
+        else:
+            positions['Ensemble'] = 0.0
     
     return positions, count
 
@@ -374,7 +414,7 @@ for i, (name, (icon, desc)) in enumerate(strategy_info_original.items()):
         else:
             st.success(f"{icon} **{name}**\n\n🔥 2x SSO")
 
-st.subheader("Research-Backed Strategies (NEW)")
+st.subheader("Research-Backed Strategies")
 strategy_info_new = {
     'Dual Momentum': ('🌍', 'Gary Antonacci GEM - US vs Intl, 12mo momentum'),
     '200 DMA Monthly': ('📅', 'Paul Tudor Jones - End of month trend filter'),
@@ -406,6 +446,29 @@ for i, (name, (icon, desc)) in enumerate(strategy_info_new.items()):
                 st.warning(f"{icon} **{name}**\n\n💵 CASH")
         st.caption(desc)
 
+st.subheader("🏆 Hybrid Strategies (Tuned)")
+strategy_info_hybrid = {
+    'Ensemble': ('🎯', 'BEST: Trend + RSI combined'),
+    'Voting System': ('🗳️', 'Need 3+ signals to enter'),
+    'Vol Adaptive': ('📊', 'Size based on volatility')
+}
+
+hybrid_cols = st.columns(3)
+for i, (name, (icon, desc)) in enumerate(strategy_info_hybrid.items()):
+    pos = positions.get(name, 0)
+    with hybrid_cols[i]:
+        if pos == 0:
+            st.warning(f"{icon} **{name}**\n\n💵 CASH")
+        elif pos == 0.5:
+            st.info(f"{icon} **{name}**\n\n📈 0.5x")
+        elif pos == 1.0:
+            st.info(f"{icon} **{name}**\n\n📈 1x SPY")
+        elif pos == 1.5:
+            st.success(f"{icon} **{name}**\n\n📈 1.5x")
+        else:
+            st.success(f"{icon} **{name}**\n\n🔥 2x")
+        st.caption(desc)
+
 # ============================================================
 # PRICE CHART SECTION
 # ============================================================
@@ -413,8 +476,8 @@ for i, (name, (icon, desc)) in enumerate(strategy_info_new.items()):
 st.header("📉 Price Chart")
 
 # Strategy selector for signals on chart
-all_strategies = list(strategy_info_original.keys()) + list(strategy_info_new.keys())
-chart_strategy = st.selectbox("Show buy/sell signals for:", all_strategies, index=3)
+all_strategies = list(strategy_info_original.keys()) + list(strategy_info_new.keys()) + list(strategy_info_hybrid.keys())
+chart_strategy = st.selectbox("Show buy/sell signals for:", all_strategies, index=len(all_strategies)-3)  # Default to Ensemble
 
 # Calculate buy/sell signals for the selected strategy
 def get_trade_signals(data, strategy_name, intl_data=None):
