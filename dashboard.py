@@ -234,7 +234,7 @@ fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
 fig.update_layout(height=600, xaxis_rangeslider_visible=False)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # ============================================================
 # BACKTEST SECTION
@@ -276,7 +276,7 @@ if run_btn:
     fig_bt.add_trace(go.Scatter(x=bt_data.index, y=bt_data['Buy_Hold'], 
                                  name='Buy & Hold', line=dict(color='blue', width=1, dash='dash')))
     fig_bt.update_layout(height=400, hovermode='x unified')
-    st.plotly_chart(fig_bt, use_container_width=True)
+    st.plotly_chart(fig_bt, width="stretch")
 
 # ============================================================
 # FOOTER
