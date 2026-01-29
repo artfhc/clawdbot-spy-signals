@@ -90,6 +90,55 @@ def load_bond_data(period='2y'):
     except:
         return None
 
+@st.cache_data(ttl=600)
+def load_sector_data():
+    """Load sector ETF data for heatmap."""
+    sectors = {
+        'XLK': 'Technology',
+        'XLF': 'Financials',
+        'XLV': 'Healthcare',
+        'XLE': 'Energy',
+        'XLI': 'Industrials',
+        'XLY': 'Consumer Disc',
+        'XLP': 'Consumer Staples',
+        'XLU': 'Utilities',
+        'XLB': 'Materials',
+        'XLRE': 'Real Estate',
+        'XLC': 'Communication'
+    }
+    
+    results = {}
+    try:
+        for ticker, name in sectors.items():
+            data = yf.download(ticker, period='6mo', progress=False)
+            if data is not None and len(data) > 0:
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.get_level_values(0)
+                
+                # Calculate metrics
+                latest_close = data['Close'].iloc[-1]
+                ma50 = data['Close'].rolling(50).mean().iloc[-1]
+                ma200 = data['Close'].rolling(200).mean().iloc[-1] if len(data) >= 200 else ma50
+                
+                # Returns
+                ret_1d = data['Close'].pct_change().iloc[-1] * 100
+                ret_1w = (data['Close'].iloc[-1] / data['Close'].iloc[-5] - 1) * 100 if len(data) >= 5 else 0
+                ret_1m = (data['Close'].iloc[-1] / data['Close'].iloc[-21] - 1) * 100 if len(data) >= 21 else 0
+                
+                results[ticker] = {
+                    'name': name,
+                    'price': latest_close,
+                    'above_50ma': latest_close > ma50,
+                    'above_200ma': latest_close > ma200,
+                    'ret_1d': ret_1d,
+                    'ret_1w': ret_1w,
+                    'ret_1m': ret_1m
+                }
+    except Exception as e:
+        pass
+    
+    return results
+
 def get_signals(row):
     """Calculate all 5 original signals for a given row."""
     signals = {
@@ -339,8 +388,28 @@ st.title("📈 SPY Trading Strategies Dashboard")
 
 # Sidebar
 st.sidebar.header("Settings")
-ticker = st.sidebar.text_input("Ticker", value="SPY")
+
+# Quick ticker selection
+st.sidebar.subheader("📈 Ticker")
+preset_tickers = ['SPY', 'QQQ', 'IWM', 'DIA', 'Custom']
+ticker_choice = st.sidebar.selectbox("Select Index", preset_tickers, index=0)
+
+if ticker_choice == 'Custom':
+    ticker = st.sidebar.text_input("Enter Ticker", value="SPY")
+else:
+    ticker = ticker_choice
+
 period = st.sidebar.selectbox("Data Period", ['1y', '2y', '3y', '5y', 'max'], index=1)
+
+# Ticker descriptions
+ticker_info = {
+    'SPY': 'S&P 500 ETF',
+    'QQQ': 'Nasdaq 100 ETF', 
+    'IWM': 'Russell 2000 ETF',
+    'DIA': 'Dow Jones ETF'
+}
+if ticker in ticker_info:
+    st.sidebar.caption(f"📊 {ticker_info[ticker]}")
 
 # Load data
 with st.spinner("Loading data..."):
@@ -384,6 +453,85 @@ for i, (name, active) in enumerate(signals.items()):
             st.success(f"✅ {name}")
         else:
             st.error(f"❌ {name}")
+
+# ============================================================
+# MARKET REGIME INDICATOR
+# ============================================================
+
+st.header("🌡️ Market Regime")
+
+# Calculate regime indicators
+above_200 = latest['Close'] > latest['MA200']
+above_50 = latest['Close'] > latest['MA50']
+ma50_above_200 = latest['MA50'] > latest['MA200']
+rsi = latest['RSI']
+vol = latest['Vol']
+
+# Determine regime
+if above_200 and ma50_above_200 and rsi > 50:
+    regime = "🟢 BULL MARKET"
+    regime_color = "green"
+    regime_desc = "Strong uptrend - all systems go"
+elif above_200 and above_50:
+    regime = "🟡 BULLISH"
+    regime_color = "orange" 
+    regime_desc = "Uptrend intact but watch for weakness"
+elif not above_200 and not ma50_above_200:
+    regime = "🔴 BEAR MARKET"
+    regime_color = "red"
+    regime_desc = "Downtrend - consider defensive positions"
+else:
+    regime = "⚪ TRANSITIONAL"
+    regime_color = "gray"
+    regime_desc = "Mixed signals - be cautious"
+
+# Vol regime
+if vol < 0.12:
+    vol_regime = "😴 Very Low Vol"
+elif vol < 0.18:
+    vol_regime = "😊 Low Vol"
+elif vol < 0.25:
+    vol_regime = "😐 Normal Vol"
+else:
+    vol_regime = "😰 High Vol"
+
+regime_cols = st.columns(3)
+with regime_cols[0]:
+    st.metric("Market Regime", regime)
+    st.caption(regime_desc)
+with regime_cols[1]:
+    st.metric("Volatility", f"{vol*100:.1f}%")
+    st.caption(vol_regime)
+with regime_cols[2]:
+    trend_strength = signal_count / 5 * 100
+    st.metric("Trend Strength", f"{trend_strength:.0f}%")
+    st.caption(f"{signal_count}/5 signals bullish")
+
+# ============================================================
+# SECTOR HEATMAP
+# ============================================================
+
+with st.expander("📊 Sector Heatmap", expanded=False):
+    sector_data = load_sector_data()
+    
+    if sector_data:
+        sector_list = []
+        for ticker, info in sector_data.items():
+            trend = "🟢" if info['above_50ma'] and info['above_200ma'] else ("🟡" if info['above_50ma'] else "🔴")
+            sector_list.append({
+                'Sector': info['name'],
+                'Ticker': ticker,
+                'Trend': trend,
+                '1D': f"{info['ret_1d']:+.1f}%",
+                '1W': f"{info['ret_1w']:+.1f}%",
+                '1M': f"{info['ret_1m']:+.1f}%"
+            })
+        
+        sector_df = pd.DataFrame(sector_list)
+        st.dataframe(sector_df, use_container_width=True, hide_index=True)
+        st.caption("🟢 Above 50 & 200 MA | 🟡 Above 50 MA only | 🔴 Below both MAs")
+    else:
+        st.info("Unable to load sector data")
 
 # ============================================================
 # STRATEGY POSITIONS SECTION
@@ -644,6 +792,122 @@ if st.button("Compare All Strategies"):
         
         comparison_df = pd.DataFrame(comparison_data)
         st.dataframe(comparison_df, use_container_width=True)
+
+# ============================================================
+# POSITION SIZER
+# ============================================================
+
+st.header("💰 Position Sizer")
+
+ps_col1, ps_col2 = st.columns(2)
+
+with ps_col1:
+    portfolio_size = st.number_input("Portfolio Size ($)", value=100000, step=5000, min_value=1000)
+    spy_price = latest['Close']
+    sso_price_approx = spy_price * 0.15  # SSO is roughly 15% of SPY price
+    
+with ps_col2:
+    st.metric("Current SPY Price", f"${spy_price:.2f}")
+    st.caption("SSO price estimated for calculations")
+
+st.subheader("📋 Position Recommendations")
+
+# Calculate positions for each strategy
+position_data = []
+for strat in ['Ensemble', 'Voting System', 'Vol Adaptive', 'Steady Eddie', 'Golden Boost']:
+    pos = positions.get(strat, 0)
+    
+    if pos == 0:
+        allocation = 0
+        etf = "CASH (SGOV/BIL)"
+        shares = 0
+    elif pos <= 1.0:
+        allocation = portfolio_size * pos
+        etf = "SPY"
+        shares = int(allocation / spy_price)
+    elif pos == 1.5:
+        # 50% SPY + 50% SSO
+        spy_alloc = portfolio_size * 0.5
+        sso_alloc = portfolio_size * 0.5
+        etf = f"SPY + SSO (50/50)"
+        shares = f"{int(spy_alloc/spy_price)} SPY + {int(sso_alloc/sso_price_approx)} SSO"
+        allocation = portfolio_size
+    else:  # 2x
+        allocation = portfolio_size
+        etf = "SSO"
+        shares = int(allocation / sso_price_approx)
+    
+    position_data.append({
+        'Strategy': strat,
+        'Signal': f"{pos}x" if pos > 0 else "CASH",
+        'ETF': etf,
+        'Shares': shares if isinstance(shares, str) else f"{shares:,}",
+        'Allocation': f"${allocation:,.0f}"
+    })
+
+position_df = pd.DataFrame(position_data)
+st.dataframe(position_df, use_container_width=True, hide_index=True)
+
+st.caption("💡 Tip: SSO is 2x leveraged SPY. For 1.5x exposure, split 50/50 between SPY and SSO.")
+
+# ============================================================
+# SIGNAL HISTORY LOG
+# ============================================================
+
+st.header("📅 Signal History")
+
+# Get signal history from recent data
+history_strat = st.selectbox("Show history for:", ['Ensemble', 'Voting System', 'Vol Adaptive', 'Steady Eddie'], key='history_strat')
+
+def get_signal_history(data, strategy_name):
+    """Get historical signal changes."""
+    history = []
+    prev_pos = None
+    entry_price = None
+    entry_date = None
+    
+    for idx, row in data.iterrows():
+        if pd.isna(row['MA200']):
+            continue
+        
+        signals = get_signals(row)
+        strat_positions, _ = get_strategy_position(signals, row, None)
+        current_pos = strat_positions.get(strategy_name, 0)
+        
+        if prev_pos is not None and current_pos != prev_pos:
+            if current_pos > 0 and prev_pos == 0:
+                # Buy signal
+                history.append({
+                    'Date': idx.strftime('%Y-%m-%d'),
+                    'Action': '🟢 BUY',
+                    'Price': f"${row['Close']:.2f}",
+                    'Position': f"{current_pos}x",
+                    'Return': ''
+                })
+                entry_price = row['Close']
+                entry_date = idx
+            elif current_pos == 0 and prev_pos > 0:
+                # Sell signal
+                ret = ((row['Close'] - entry_price) / entry_price * 100) if entry_price else 0
+                history.append({
+                    'Date': idx.strftime('%Y-%m-%d'),
+                    'Action': '🔴 SELL',
+                    'Price': f"${row['Close']:.2f}",
+                    'Position': 'CASH',
+                    'Return': f"{ret:+.1f}%"
+                })
+                entry_price = None
+        
+        prev_pos = current_pos
+    
+    return history[-10:]  # Last 10 signals
+
+history = get_signal_history(data, history_strat)
+if history:
+    history_df = pd.DataFrame(history)
+    st.dataframe(history_df, use_container_width=True, hide_index=True)
+else:
+    st.info("No signal changes in the selected period.")
 
 # ============================================================
 # FOOTER
