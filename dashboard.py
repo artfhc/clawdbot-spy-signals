@@ -857,7 +857,7 @@ st.caption("💡 Tip: SSO is 2x leveraged SPY. For 1.5x exposure, split 50/50 be
 st.header("📅 Signal History")
 
 # Get signal history from recent data
-history_strat = st.selectbox("Show history for:", ['Ensemble', 'Voting System', 'Vol Adaptive', 'Steady Eddie'], key='history_strat')
+history_strat = st.selectbox("Show history for:", all_strategies, key='history_strat')
 
 def get_signal_history(data, strategy_name):
     """Get historical signal changes."""
@@ -982,7 +982,7 @@ with st.expander("Check Rebalancing Needs", expanded=False):
     reb_col1, reb_col2 = st.columns(2)
     
     with reb_col1:
-        target_strategy = st.selectbox("Target Strategy", ['Ensemble', 'Voting System', 'Vol Adaptive', 'Steady Eddie'], key='rebal_strat')
+        target_strategy = st.selectbox("Target Strategy", all_strategies, key='rebal_strat')
         current_spy_pct = st.slider("Current SPY %", 0, 100, 50)
         current_sso_pct = st.slider("Current SSO %", 0, 100, 0)
         current_cash_pct = 100 - current_spy_pct - current_sso_pct
