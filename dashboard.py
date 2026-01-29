@@ -910,6 +910,120 @@ else:
     st.info("No signal changes in the selected period.")
 
 # ============================================================
+# PORTFOLIO TRACKER
+# ============================================================
+
+st.header("📈 Portfolio Tracker")
+
+with st.expander("Track Your Portfolio", expanded=False):
+    st.subheader("Enter Your Holdings")
+    
+    track_col1, track_col2, track_col3 = st.columns(3)
+    
+    with track_col1:
+        spy_shares = st.number_input("SPY Shares", value=0, min_value=0, step=1)
+        spy_avg_cost = st.number_input("SPY Avg Cost ($)", value=0.0, min_value=0.0, step=1.0)
+    
+    with track_col2:
+        sso_shares = st.number_input("SSO Shares", value=0, min_value=0, step=1)
+        sso_avg_cost = st.number_input("SSO Avg Cost ($)", value=0.0, min_value=0.0, step=1.0)
+    
+    with track_col3:
+        cash_balance = st.number_input("Cash Balance ($)", value=0.0, min_value=0.0, step=100.0)
+    
+    if spy_shares > 0 or sso_shares > 0 or cash_balance > 0:
+        # Calculate current values
+        spy_price = latest['Close']
+        sso_price = spy_price * 0.15  # Approximate
+        
+        spy_value = spy_shares * spy_price
+        sso_value = sso_shares * sso_price
+        total_value = spy_value + sso_value + cash_balance
+        
+        # Calculate P&L
+        spy_cost_basis = spy_shares * spy_avg_cost if spy_avg_cost > 0 else spy_value
+        sso_cost_basis = sso_shares * sso_avg_cost if sso_avg_cost > 0 else sso_value
+        total_cost = spy_cost_basis + sso_cost_basis + cash_balance
+        
+        total_pnl = (spy_value + sso_value) - (spy_cost_basis + sso_cost_basis)
+        total_pnl_pct = (total_pnl / (spy_cost_basis + sso_cost_basis) * 100) if (spy_cost_basis + sso_cost_basis) > 0 else 0
+        
+        # Current allocation
+        spy_pct = (spy_value / total_value * 100) if total_value > 0 else 0
+        sso_pct = (sso_value / total_value * 100) if total_value > 0 else 0
+        cash_pct = (cash_balance / total_value * 100) if total_value > 0 else 0
+        
+        st.subheader("Portfolio Summary")
+        
+        port_cols = st.columns(4)
+        with port_cols[0]:
+            st.metric("Total Value", f"${total_value:,.2f}")
+        with port_cols[1]:
+            st.metric("Total P&L", f"${total_pnl:,.2f}", delta=f"{total_pnl_pct:+.1f}%")
+        with port_cols[2]:
+            # Current effective leverage
+            leverage = (spy_pct + sso_pct * 2) / 100
+            st.metric("Effective Leverage", f"{leverage:.2f}x")
+        with port_cols[3]:
+            st.metric("Cash", f"{cash_pct:.1f}%")
+        
+        # Allocation breakdown
+        st.caption(f"Allocation: SPY {spy_pct:.1f}% | SSO {sso_pct:.1f}% | Cash {cash_pct:.1f}%")
+
+# ============================================================
+# REBALANCE REMINDER
+# ============================================================
+
+st.header("🔔 Rebalance Checker")
+
+with st.expander("Check Rebalancing Needs", expanded=False):
+    st.subheader("Current vs Target Allocation")
+    
+    reb_col1, reb_col2 = st.columns(2)
+    
+    with reb_col1:
+        target_strategy = st.selectbox("Target Strategy", ['Ensemble', 'Voting System', 'Vol Adaptive', 'Steady Eddie'], key='rebal_strat')
+        current_spy_pct = st.slider("Current SPY %", 0, 100, 50)
+        current_sso_pct = st.slider("Current SSO %", 0, 100, 0)
+        current_cash_pct = 100 - current_spy_pct - current_sso_pct
+        st.caption(f"Cash: {current_cash_pct}%")
+    
+    with reb_col2:
+        # Get target allocation based on strategy signal
+        target_pos = positions.get(target_strategy, 0)
+        
+        if target_pos == 0:
+            target_spy = 0
+            target_sso = 0
+            target_cash = 100
+        elif target_pos == 1.0:
+            target_spy = 100
+            target_sso = 0
+            target_cash = 0
+        elif target_pos == 1.5:
+            target_spy = 50
+            target_sso = 50
+            target_cash = 0
+        else:  # 2x
+            target_spy = 0
+            target_sso = 100
+            target_cash = 0
+        
+        st.metric("Target SPY", f"{target_spy}%", delta=f"{target_spy - current_spy_pct:+d}%")
+        st.metric("Target SSO", f"{target_sso}%", delta=f"{target_sso - current_sso_pct:+d}%")
+        st.metric("Target Cash", f"{target_cash}%", delta=f"{target_cash - current_cash_pct:+d}%")
+    
+    # Calculate drift
+    total_drift = abs(target_spy - current_spy_pct) + abs(target_sso - current_sso_pct) + abs(target_cash - current_cash_pct)
+    
+    if total_drift > 20:
+        st.error(f"⚠️ REBALANCE RECOMMENDED - Total drift: {total_drift/2:.0f}%")
+    elif total_drift > 10:
+        st.warning(f"🟡 Consider rebalancing - Total drift: {total_drift/2:.0f}%")
+    else:
+        st.success(f"✅ Portfolio aligned - Total drift: {total_drift/2:.0f}%")
+
+# ============================================================
 # FOOTER
 # ============================================================
 
