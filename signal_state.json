@@ -1,0 +1,17 @@
+{
+  "date": "2026-01-28",
+  "price": 695.4199829101562,
+  "signals": {
+    "Trend Rider": "LONG 1x",
+    "Golden Boost": "LONG 1.5x",
+    "Signal Stacker": "LONG 2x",
+    "Steady Eddie": "LONG 2x",
+    "Full Send": "LONG 2x",
+    "200 DMA Monthly": "LONG 1x",
+    "RSI Bounce": "CASH",
+    "Dual Momentum": "BONDS",
+    "Voting System": "LONG 1.5x",
+    "Vol Adaptive": "LONG 2x",
+    "Ensemble": "LONG 1x"
+  }
+}
