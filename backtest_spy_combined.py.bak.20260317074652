@@ -1,4 +1,3 @@
-```python
 #!/usr/bin/env python3
 """
 SPY Combined Strategy with Dynamic Leverage
@@ -6,9 +5,9 @@ Base: Trend Filter
 Leverage up when multiple signals align
 """
 
-import yfinance as yf  # type: ignore
-import pandas as pd  # type: ignore
-import numpy as np  # type: ignore
+import yfinance as yf
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
 def fetch_spy_data(start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -113,47 +112,107 @@ def calculate_positions(spy: pd.DataFrame) -> pd.DataFrame:
     spy['Position_E'] = spy['Sig_TrendFilter'] * 1.0
     spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Sig_GoldenCross'] == 1) & 
             (spy['Sig_Momentum'] == 1), 'Position_E'] = 2.0
-    # Calculate position F (trend rider)
-    spy['Position_F'] = 0.0
-    spy.loc[spy['Sig_TrendFilter'] == 1, 'Position_F'] = 1.0
-    # Calculate position G (golden boost)
-    spy['Position_G'] = 0.0
-    spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Sig_GoldenCross'] == 1), 'Position_G'] = 1.5
-    # Calculate position H (signal stacker)
-    spy['Position_H'] = 0.0
-    spy.loc[spy['Sig_TrendFilter'] == 1, 'Position_H'] = 1.0
-    spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Signal_Count'] >= 4), 'Position_H'] = 1.5
-    spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Signal_Count'] == 5), 'Position_H'] = 2.0
-    # Calculate position I (steady eddie)
-    spy['Position_I'] = 0.0
-    spy.loc[spy['Signal_Count'] >= 3, 'Position_I'] = 1.0
-    spy.loc[spy['Signal_Count'] >= 4, 'Position_I'] = 1.5
-    spy.loc[spy['Signal_Count'] == 5, 'Position_I'] = 2.0
-    # Calculate position J (full send)
-    spy['Position_J'] = spy['Sig_TrendFilter'] * 1.0
-    spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Sig_GoldenCross'] == 1) & 
-            (spy['Sig_Momentum'] == 1), 'Position_J'] = 2.0
-    # Calculate position K (rsi bounce)
-    spy['Position_K'] = 0.0
-    spy.loc[spy['Sig_RSI_OK'] == 1, 'Position_K'] = 1.0
-    # Calculate position L (dual momentum)
-    spy['Position_L'] = 0.0
-    spy.loc[(spy['Sig_Momentum'] == 1) & (spy['Sig_RSI_OK'] == 1), 'Position_L'] = 1.5
-    # Calculate position M (ensemble)
-    spy['Position_M'] = 0.0
-    spy.loc[spy['Signal_Count'] >= 4, 'Position_M'] = 1.0
-    spy.loc[spy['Signal_Count'] == 5, 'Position_M'] = 1.5
-    # Calculate position N (voting system)
-    spy['Position_N'] = 0.0
-    spy.loc[spy['Signal_Count'] >= 3, 'Position_N'] = 1.0
-    spy.loc[spy['Signal_Count'] >= 4, 'Position_N'] = 1.5
-    spy.loc[spy['Signal_Count'] == 5, 'Position_N'] = 2.0
-    # Calculate position O (vol adaptive)
-    spy['Position_O'] = spy['Sig_TrendFilter'] * 1.0
-    spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Sig_GoldenCross'] == 1) & 
-            (spy['Sig_Momentum'] == 1), 'Position_O'] = 2.0
-    # Calculate position P (conservative)
-    spy['Position_P'] = 0.0
-    spy.loc[spy['Signal_Count'] >= 3, 'Position_P'] = 1.0
-    spy.loc[spy['Signal_Count'] >= 4, 'Position_P'] = 1.5
-    spy.loc[spy
+    return spy
+
+def calculate_returns(spy: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate returns.
+
+    Args:
+        spy (pd.DataFrame): SPY data with positions.
+
+    Returns:
+        pd.DataFrame: SPY data with returns.
+    """
+    # Calculate daily return
+    spy['Daily_Return'] = spy['Close'].pct_change()
+    # Calculate return for buy and hold
+    spy['Return_BH'] = spy['Daily_Return']
+    # Calculate return for position A
+    spy['Return_A'] = spy['Position_A'].shift(1) * spy['Daily_Return']
+    # Calculate return for position B
+    spy['Return_B'] = spy['Position_B'].shift(1) * spy['Daily_Return']
+    # Calculate return for position C
+    spy['Return_C'] = spy['Position_C'].shift(1) * spy['Daily_Return']
+    # Calculate return for position D
+    spy['Return_D'] = spy['Position_D'].shift(1) * spy['Daily_Return']
+    # Calculate return for position E
+    spy['Return_E'] = spy['Position_E'].shift(1) * spy['Daily_Return']
+    return spy
+
+def calculate_cumulative_returns(spy: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate cumulative returns.
+
+    Args:
+        spy (pd.DataFrame): SPY data with returns.
+
+    Returns:
+        pd.DataFrame: SPY data with cumulative returns.
+    """
+    for col in ['BH', 'A', 'B', 'C', 'D', 'E']:
+        spy[f'Cum_{col}'] = (1 + spy[f'Return_{col}']).cumprod()
+    return spy
+
+def calculate_metrics(returns: pd.Series, positions: pd.Series = None) -> dict:
+    """
+    Calculate metrics.
+
+    Args:
+        returns (pd.Series): Returns.
+        positions (pd.Series, optional): Positions. Defaults to None.
+
+    Returns:
+        dict: Metrics.
+    """
+    # Drop NaN values
+    returns = returns.dropna()
+    # Calculate cumulative returns
+    cum = (1 + returns).cumprod()
+    # Calculate total return
+    total = cum.iloc[-1] - 1
+    # Calculate years
+    years = len(returns) / 252
+    # Calculate annual return
+    ann_ret = (1 + total) ** (1/years) - 1
+    # Calculate volatility
+    vol = returns.std() * np.sqrt(252)
+    # Calculate Sharpe ratio
+    sharpe = ann_ret / vol if vol > 0 else 0
+    
+    # Calculate maximum drawdown
+    rolling_max = cum.cummax()
+    dd = (cum - rolling_max) / rolling_max
+    max_dd = dd.min()
+    
+    # Calculate Calmar ratio
+    calmar = abs(ann_ret / max_dd) if max_dd != 0 else 0
+    
+    # Calculate average leverage if positions provided
+    avg_lev = positions.mean() if positions is not None else 1.0
+    
+    return {
+        'total': total,
+        'ann_ret': ann_ret,
+        'vol': vol,
+        'sharpe': sharpe,
+        'max_dd': max_dd,
+        'calmar': calmar,
+        'avg_lev': avg_lev
+    }
+
+def main():
+    global end_date
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=365*10 + 250)
+    spy = fetch_spy_data(start_date, end_date)
+    spy = calculate_indicators(spy)
+    spy = calculate_signals(spy)
+    spy = calculate_positions(spy)
+    spy = calculate_returns(spy)
+    spy = calculate_cumulative_returns(spy)
+
+    metrics = {
+        'Buy & Hold': calculate_metrics(spy['Return_BH']),
+        'A: Trend Filter': calculate_metrics(spy['Return_A'], spy['Position_A']),
+        'B: TF + GC Lev

@@ -1,4 +1,3 @@
-```python
 #!/usr/bin/env python3
 """
 SPY Moving Average Strategy Backtest
@@ -7,9 +6,9 @@ SPY Moving Average Strategy Backtest
 - Flat otherwise (between 50 DMA and 200 DMA when 50 < 200)
 """
 
-import yfinance as yf  # type: ignore
-import pandas as pd  # type: ignore
-import numpy as np  # type: ignore
+import yfinance as yf
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
 def fetch_spy_data(start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -24,12 +23,8 @@ def fetch_spy_data(start_date: datetime, end_date: datetime) -> pd.DataFrame:
     pd.DataFrame: SPY data.
     """
     print("Fetching SPY data...")
-    try:
-        spy = yf.download('SPY', start=start_date, end=end_date, progress=False)
-        return spy
-    except Exception as e:
-        print(f"Failed to fetch SPY data: {e}")
-        return None
+    spy = yf.download('SPY', start=start_date, end=end_date, progress=False)
+    return spy
 
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -82,9 +77,6 @@ def trim_to_ten_years(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
     pd.DataFrame: DataFrame trimmed to 10 years.
     """
-    if len(df) < 365 * 10:
-        print("Warning: Less than 10 years of data available.")
-        return df
     ten_years_ago = df.index[-1] - timedelta(days=365*10)
     df = df[df.index >= ten_years_ago]
     return df
@@ -205,18 +197,12 @@ def print_results(strategy_metrics: dict, buyhold_metrics: dict, initial: float,
     print("=" * 60)
     print()
 
-    # Calculate position breakdown
-    long_days = (strategy_metrics['Signal'] == 1).sum()
-    short_days = (strategy_metrics['Signal'] == -1).sum()
-    flat_days = (strategy_metrics['Signal'] == 0).sum()
-    total_days = len(strategy_metrics['Signal'])
-    print(f"POSITION BREAKDOWN:")
+    print("POSITION BREAKDOWN:")
     print(f"  Long days:   {long_days:,} ({100*long_days/total_days:.1f}%)")
     print(f"  Short days:  {short_days:,} ({100*short_days/total_days:.1f}%)")
     print(f"  Flat days:   {flat_days:,} ({100*flat_days/total_days:.1f}%)")
     print()
 
-    # Print performance comparison
     print("PERFORMANCE COMPARISON:")
     print("-" * 60)
     print(f"{'Metric':<25} {'MA Strategy':>15} {'Buy & Hold':>15}")
@@ -230,13 +216,11 @@ def print_results(strategy_metrics: dict, buyhold_metrics: dict, initial: float,
     print("-" * 60)
     print()
 
-    # Print final values
     print("FINAL VALUES (Starting: $10,000):")
     print(f"  MA Strategy:  ${final_strategy:,.0f}")
     print(f"  Buy & Hold:   ${final_buyhold:,.0f}")
     print()
 
-    # Print yearly returns
     print("YEARLY RETURNS:")
     print("-" * 45)
     spy['Year'] = spy.index.year
@@ -244,4 +228,17 @@ def print_results(strategy_metrics: dict, buyhold_metrics: dict, initial: float,
         'Strategy_Return': lambda x: (1 + x).prod() - 1,
         'Daily_Return': lambda x: (1 + x).prod() - 1
     })
-    yearly.columns = ['Strategy', 'Buy&
+    yearly.columns = ['Strategy', 'Buy&Hold']
+
+    print(f"{'Year':<10} {'Strategy':>15} {'Buy & Hold':>15}")
+    print("-" * 45)
+    for year, row in yearly.iterrows():
+        print(f"{year:<10} {row['Strategy']*100:>14.1f}% {row['Buy&Hold']*100:>14.1f}%")
+    print("-" * 45)
+    print()
+
+    if len(short_returns) > 0:
+        print(f"SHORT POSITION PERFORMANCE:")
+        print(f"  Total return from shorts: {short_total*100:.1f}%")
+        print(f"  Avg daily return (short): {short_returns.mean()*100:.3f}%")
+        print(f"

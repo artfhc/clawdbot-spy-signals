@@ -16,11 +16,11 @@ Setup:
 
 import os
 import yfinance as yf
-import pandas as pd  # type: ignore
+import pandas as pd
 from datetime import datetime
-from alpaca.trading.client import TradingClient  # type: ignore
-from alpaca.trading.requests import MarketOrderRequest  # type: ignore
-from alpaca.trading.enums import OrderSide, TimeInForce  # type: ignore
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
 
 
 def check_alpaca_installed() -> bool:
@@ -31,7 +31,7 @@ def check_alpaca_installed() -> bool:
         bool: True if installed, False otherwise.
     """
     try:
-        from alpaca.trading.client import TradingClient  # type: ignore
+        from alpaca.trading.client import TradingClient
 
         return True
     except ImportError as e:
@@ -234,6 +234,8 @@ if __name__ == "__main__":
     main()
 ```
 
+**Documentation Update**
+
 ```markdown
 # Alpaca Auto-Trader
 
@@ -273,3 +275,5 @@ Automated SPY Trading with Alpaca
 
 ### 4. Steady Eddie
 
+* Logic: Long SPY when 20-day MA > Close
+* Leverage Range: 1

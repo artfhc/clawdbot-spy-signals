@@ -6,9 +6,9 @@ Base: Trend Filter
 Leverage up when multiple signals align
 """
 
-import yfinance as yf  # type: ignore
-import pandas as pd  # type: ignore
-import numpy as np  # type: ignore
+import yfinance as yf
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
 def fetch_spy_data(start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -156,4 +156,4 @@ def calculate_positions(spy: pd.DataFrame) -> pd.DataFrame:
     spy['Position_P'] = 0.0
     spy.loc[spy['Signal_Count'] >= 3, 'Position_P'] = 1.0
     spy.loc[spy['Signal_Count'] >= 4, 'Position_P'] = 1.5
-    spy.loc[spy
+    spy.loc[spy['Signal_Count'] == 5, 'Position_P'] = 2
