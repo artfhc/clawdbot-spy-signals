@@ -804,7 +804,12 @@ ps_col1, ps_col2 = st.columns(2)
 with ps_col1:
     portfolio_size = st.number_input("Portfolio Size ($)", value=100000, step=5000, min_value=1000)
     spy_price = latest['Close']
-    sso_price_approx = spy_price * 0.15  # SSO is roughly 15% of SPY price
+    # Fetch actual SSO price instead of using incorrect approximation
+    sso_data = yf.download('SSO', period='1d', progress=False)
+    if not sso_data.empty:
+        sso_price_approx = float(sso_data['Close'].iloc[-1])
+    else:
+        sso_price_approx = spy_price * 0.18  # Fallback: approximate 2026 ratio
     
 with ps_col2:
     st.metric("Current SPY Price", f"${spy_price:.2f}")
@@ -934,7 +939,12 @@ with st.expander("Track Your Portfolio", expanded=False):
     if spy_shares > 0 or sso_shares > 0 or cash_balance > 0:
         # Calculate current values
         spy_price = latest['Close']
-        sso_price = spy_price * 0.15  # Approximate
+        # Fetch actual SSO price instead of using incorrect approximation
+        sso_data = yf.download('SSO', period='1d', progress=False)
+        if not sso_data.empty:
+            sso_price = float(sso_data['Close'].iloc[-1])
+        else:
+            sso_price = spy_price * 0.18  # Fallback: approximate 2026 ratio
         
         spy_value = spy_shares * spy_price
         sso_value = sso_shares * sso_price
