@@ -7,9 +7,9 @@ SPY Moving Average Strategy Backtest
 - Flat otherwise (between 50 DMA and 200 DMA when 50 < 200)
 """
 
-import yfinance as yf  # type: ignore
-import pandas as pd  # type: ignore
-import numpy as np  # type: ignore
+import yfinance as yf
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
 def fetch_spy_data(start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -244,4 +244,6 @@ def print_results(strategy_metrics: dict, buyhold_metrics: dict, initial: float,
         'Strategy_Return': lambda x: (1 + x).prod() - 1,
         'Daily_Return': lambda x: (1 + x).prod() - 1
     })
-    yearly.columns = ['Strategy', 'Buy&
+    yearly.columns = ['Strategy', 'Buy&Hold']
+
+    print(f"{'Year':<10} {'Strategy':
