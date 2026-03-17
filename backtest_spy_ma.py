@@ -11,53 +11,142 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-# Fetch 10 years of SPY data
-end_date = datetime.now()
-start_date = end_date - timedelta(days=365*10 + 200)  # Extra days for MA warmup
+def fetch_spy_data(start_date: datetime, end_date: datetime) -> pd.DataFrame:
+    """
+    Fetches 10 years of SPY data.
 
-print("Fetching SPY data...")
-spy = yf.download('SPY', start=start_date, end=end_date, progress=False)
+    Args:
+    start_date (datetime): Start date of the data range.
+    end_date (datetime): End date of the data range.
 
-# Flatten multi-level columns if present
-if isinstance(spy.columns, pd.MultiIndex):
-    spy.columns = spy.columns.get_level_values(0)
+    Returns:
+    pd.DataFrame: SPY data.
+    """
+    print("Fetching SPY data...")
+    spy = yf.download('SPY', start=start_date, end=end_date, progress=False)
+    return spy
 
-print(f"Data range: {spy.index[0].strftime('%Y-%m-%d')} to {spy.index[-1].strftime('%Y-%m-%d')}")
-print(f"Total trading days: {len(spy)}")
+def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Flattens multi-level columns if present.
 
-# Calculate moving averages
-spy['MA50'] = spy['Close'].rolling(window=50).mean()
-spy['MA200'] = spy['Close'].rolling(window=200).mean()
+    Args:
+    df (pd.DataFrame): DataFrame to flatten.
 
-# Drop NaN rows (warmup period)
-spy = spy.dropna()
+    Returns:
+    pd.DataFrame: DataFrame with flattened columns.
+    """
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
 
-# Trim to exactly 10 years
-ten_years_ago = end_date - timedelta(days=365*10)
-spy = spy[spy.index >= ten_years_ago]
+def calculate_moving_averages(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates moving averages.
 
-print(f"Backtest period: {spy.index[0].strftime('%Y-%m-%d')} to {spy.index[-1].strftime('%Y-%m-%d')}")
-print(f"Trading days in backtest: {len(spy)}")
-print()
+    Args:
+    df (pd.DataFrame): DataFrame with Close prices.
 
-# Strategy signals
-# Position: 1 = Long, -1 = Short, 0 = Flat
-spy['Signal'] = 0
-spy.loc[spy['Close'] > spy['MA50'], 'Signal'] = 1   # Long above 50 DMA
-spy.loc[spy['Close'] < spy['MA200'], 'Signal'] = -1  # Short below 200 DMA
+    Returns:
+    pd.DataFrame: DataFrame with moving averages.
+    """
+    df['MA50'] = df['Close'].rolling(window=50).mean()
+    df['MA200'] = df['Close'].rolling(window=200).mean()
+    return df
 
-# Calculate daily returns
-spy['Daily_Return'] = spy['Close'].pct_change()
+def drop_warmup_period(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drops NaN rows (warmup period).
 
-# Strategy returns (position from previous day applied to today's return)
-spy['Strategy_Return'] = spy['Signal'].shift(1) * spy['Daily_Return']
+    Args:
+    df (pd.DataFrame): DataFrame to drop NaN rows from.
 
-# Buy and hold returns
-spy['BuyHold_Cumulative'] = (1 + spy['Daily_Return']).cumprod()
-spy['Strategy_Cumulative'] = (1 + spy['Strategy_Return']).cumprod()
+    Returns:
+    pd.DataFrame: DataFrame with NaN rows dropped.
+    """
+    df = df.dropna()
+    return df
 
-# Calculate metrics
-def calculate_metrics(returns, name):
+def trim_to_ten_years(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Trims DataFrame to exactly 10 years.
+
+    Args:
+    df (pd.DataFrame): DataFrame to trim.
+
+    Returns:
+    pd.DataFrame: DataFrame trimmed to 10 years.
+    """
+    ten_years_ago = df.index[-1] - timedelta(days=365*10)
+    df = df[df.index >= ten_years_ago]
+    return df
+
+def calculate_strategy_signals(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates strategy signals.
+
+    Args:
+    df (pd.DataFrame): DataFrame with moving averages.
+
+    Returns:
+    pd.DataFrame: DataFrame with strategy signals.
+    """
+    df['Signal'] = 0
+    df.loc[df['Close'] > df['MA50'], 'Signal'] = 1   # Long above 50 DMA
+    df.loc[df['Close'] < df['MA200'], 'Signal'] = -1  # Short below 200 DMA
+    return df
+
+def calculate_daily_returns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates daily returns.
+
+    Args:
+    df (pd.DataFrame): DataFrame with Close prices.
+
+    Returns:
+    pd.DataFrame: DataFrame with daily returns.
+    """
+    df['Daily_Return'] = df['Close'].pct_change()
+    return df
+
+def calculate_strategy_returns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates strategy returns.
+
+    Args:
+    df (pd.DataFrame): DataFrame with strategy signals.
+
+    Returns:
+    pd.DataFrame: DataFrame with strategy returns.
+    """
+    df['Strategy_Return'] = df['Signal'].shift(1) * df['Daily_Return']
+    return df
+
+def calculate_buy_and_hold_returns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates buy and hold returns.
+
+    Args:
+    df (pd.DataFrame): DataFrame with daily returns.
+
+    Returns:
+    pd.DataFrame: DataFrame with buy and hold returns.
+    """
+    df['BuyHold_Cumulative'] = (1 + df['Daily_Return']).cumprod()
+    df['Strategy_Cumulative'] = (1 + df['Strategy_Return']).cumprod()
+    return df
+
+def calculate_metrics(returns: pd.Series, name: str) -> dict:
+    """
+    Calculates metrics.
+
+    Args:
+    returns (pd.Series): Series with returns.
+    name (str): Name of the strategy.
+
+    Returns:
+    dict: Dictionary with metrics.
+    """
     cumulative = (1 + returns).cumprod()
     total_return = cumulative.iloc[-1] - 1
     
@@ -91,74 +180,65 @@ def calculate_metrics(returns, name):
         'win_rate': win_rate
     }
 
-# Get metrics
-strategy_metrics = calculate_metrics(spy['Strategy_Return'].dropna(), 'MA Strategy')
-buyhold_metrics = calculate_metrics(spy['Daily_Return'].dropna(), 'Buy & Hold')
+def print_results(strategy_metrics: dict, buyhold_metrics: dict, initial: float, final_strategy: float, final_buyhold: float) -> None:
+    """
+    Prints results.
 
-# Count positions
-long_days = (spy['Signal'] == 1).sum()
-short_days = (spy['Signal'] == -1).sum()
-flat_days = (spy['Signal'] == 0).sum()
-total_days = len(spy)
+    Args:
+    strategy_metrics (dict): Dictionary with strategy metrics.
+    buyhold_metrics (dict): Dictionary with buy and hold metrics.
+    initial (float): Initial amount.
+    final_strategy (float): Final amount for strategy.
+    final_buyhold (float): Final amount for buy and hold.
+    """
+    print("=" * 60)
+    print("BACKTEST RESULTS: SPY Moving Average Strategy")
+    print("Strategy: Long > 50 DMA | Short < 200 DMA | Flat otherwise")
+    print("=" * 60)
+    print()
 
-# Print results
-print("=" * 60)
-print("BACKTEST RESULTS: SPY Moving Average Strategy")
-print("Strategy: Long > 50 DMA | Short < 200 DMA | Flat otherwise")
-print("=" * 60)
-print()
+    print("POSITION BREAKDOWN:")
+    print(f"  Long days:   {long_days:,} ({100*long_days/total_days:.1f}%)")
+    print(f"  Short days:  {short_days:,} ({100*short_days/total_days:.1f}%)")
+    print(f"  Flat days:   {flat_days:,} ({100*flat_days/total_days:.1f}%)")
+    print()
 
-print("POSITION BREAKDOWN:")
-print(f"  Long days:   {long_days:,} ({100*long_days/total_days:.1f}%)")
-print(f"  Short days:  {short_days:,} ({100*short_days/total_days:.1f}%)")
-print(f"  Flat days:   {flat_days:,} ({100*flat_days/total_days:.1f}%)")
-print()
+    print("PERFORMANCE COMPARISON:")
+    print("-" * 60)
+    print(f"{'Metric':<25} {'MA Strategy':>15} {'Buy & Hold':>15}")
+    print("-" * 60)
+    print(f"{'Total Return':<25} {strategy_metrics['total_return']*100:>14.1f}% {buyhold_metrics['total_return']*100:>14.1f}%")
+    print(f"{'Annualized Return':<25} {strategy_metrics['annualized_return']*100:>14.1f}% {buyhold_metrics['annualized_return']*100:>14.1f}%")
+    print(f"{'Volatility (Ann.)':<25} {strategy_metrics['volatility']*100:>14.1f}% {buyhold_metrics['volatility']*100:>14.1f}%")
+    print(f"{'Sharpe Ratio':<25} {strategy_metrics['sharpe']:>15.2f} {buyhold_metrics['sharpe']:>15.2f}")
+    print(f"{'Max Drawdown':<25} {strategy_metrics['max_drawdown']*100:>14.1f}% {buyhold_metrics['max_drawdown']*100:>14.1f}%")
+    print(f"{'Win Rate (daily)':<25} {strategy_metrics['win_rate']*100:>14.1f}% {buyhold_metrics['win_rate']*100:>14.1f}%")
+    print("-" * 60)
+    print()
 
-print("PERFORMANCE COMPARISON:")
-print("-" * 60)
-print(f"{'Metric':<25} {'MA Strategy':>15} {'Buy & Hold':>15}")
-print("-" * 60)
-print(f"{'Total Return':<25} {strategy_metrics['total_return']*100:>14.1f}% {buyhold_metrics['total_return']*100:>14.1f}%")
-print(f"{'Annualized Return':<25} {strategy_metrics['annualized_return']*100:>14.1f}% {buyhold_metrics['annualized_return']*100:>14.1f}%")
-print(f"{'Volatility (Ann.)':<25} {strategy_metrics['volatility']*100:>14.1f}% {buyhold_metrics['volatility']*100:>14.1f}%")
-print(f"{'Sharpe Ratio':<25} {strategy_metrics['sharpe']:>15.2f} {buyhold_metrics['sharpe']:>15.2f}")
-print(f"{'Max Drawdown':<25} {strategy_metrics['max_drawdown']*100:>14.1f}% {buyhold_metrics['max_drawdown']*100:>14.1f}%")
-print(f"{'Win Rate (daily)':<25} {strategy_metrics['win_rate']*100:>14.1f}% {buyhold_metrics['win_rate']*100:>14.1f}%")
-print("-" * 60)
-print()
+    print("FINAL VALUES (Starting: $10,000):")
+    print(f"  MA Strategy:  ${final_strategy:,.0f}")
+    print(f"  Buy & Hold:   ${final_buyhold:,.0f}")
+    print()
 
-# Final values (starting with $10,000)
-initial = 10000
-final_strategy = initial * spy['Strategy_Cumulative'].iloc[-1]
-final_buyhold = initial * spy['BuyHold_Cumulative'].iloc[-1]
+    print("YEARLY RETURNS:")
+    print("-" * 45)
+    spy['Year'] = spy.index.year
+    yearly = spy.groupby('Year').agg({
+        'Strategy_Return': lambda x: (1 + x).prod() - 1,
+        'Daily_Return': lambda x: (1 + x).prod() - 1
+    })
+    yearly.columns = ['Strategy', 'Buy&Hold']
 
-print("FINAL VALUES (Starting: $10,000):")
-print(f"  MA Strategy:  ${final_strategy:,.0f}")
-print(f"  Buy & Hold:   ${final_buyhold:,.0f}")
-print()
+    print(f"{'Year':<10} {'Strategy':>15} {'Buy & Hold':>15}")
+    print("-" * 45)
+    for year, row in yearly.iterrows():
+        print(f"{year:<10} {row['Strategy']*100:>14.1f}% {row['Buy&Hold']*100:>14.1f}%")
+    print("-" * 45)
+    print()
 
-# Yearly breakdown
-print("YEARLY RETURNS:")
-print("-" * 45)
-spy['Year'] = spy.index.year
-yearly = spy.groupby('Year').agg({
-    'Strategy_Return': lambda x: (1 + x).prod() - 1,
-    'Daily_Return': lambda x: (1 + x).prod() - 1
-})
-yearly.columns = ['Strategy', 'Buy&Hold']
-
-print(f"{'Year':<10} {'Strategy':>15} {'Buy & Hold':>15}")
-print("-" * 45)
-for year, row in yearly.iterrows():
-    print(f"{year:<10} {row['Strategy']*100:>14.1f}% {row['Buy&Hold']*100:>14.1f}%")
-print("-" * 45)
-print()
-
-# Short performance specifically
-short_returns = spy[spy['Signal'].shift(1) == -1]['Strategy_Return']
-if len(short_returns) > 0:
-    short_total = (1 + short_returns).prod() - 1
-    print(f"SHORT POSITION PERFORMANCE:")
-    print(f"  Total return from shorts: {short_total*100:.1f}%")
-    print(f"  Avg daily return (short): {short_returns.mean()*100:.3f}%")
-    print(f"  Short win rate: {(short_returns > 0).sum() / len(short_returns) * 100:.1f}%")
+    if len(short_returns) > 0:
+        print(f"SHORT POSITION PERFORMANCE:")
+        print(f"  Total return from shorts: {short_total*100:.1f}%")
+        print(f"  Avg daily return (short): {short_returns.mean()*100:.3f}%")
+        print(f"
