@@ -118,6 +118,16 @@ for col in ['BH', 'A', 'B', 'C', 'D', 'E']:
 
 # Metrics function
 def calc_metrics(returns, positions=None):
+    """
+    Compute standard performance metrics for a return series.
+
+    Args:
+        returns (pd.Series): Daily strategy returns as a fraction.
+        positions (pd.Series, optional): Daily leverage series for average leverage calculation.
+
+    Returns:
+        dict: Performance metrics including total return, CAGR, volatility, Sharpe ratio, and Max Drawdown.
+    """
     returns = returns.dropna()
     cum = (1 + returns).cumprod()
     total = cum.iloc[-1] - 1

@@ -29,7 +29,15 @@ except ImportError:
     print("⚠️  Alpaca not installed. Run: pip install alpaca-py")
 
 def get_signal_conservative(ticker='SPY'):
-    """Get Conservative strategy signal (D)."""
+    """
+    Get Conservative strategy signal (D) based on 5 technical signals.
+
+    Args:
+        ticker (str): The stock ticker to analyze.
+
+    Returns:
+        tuple: (target_leverage float, signal_count int)
+    """
     data = yf.download(ticker, period='1y', progress=False)
     
     if isinstance(data.columns, pd.MultiIndex):
@@ -69,8 +77,11 @@ def get_signal_conservative(ticker='SPY'):
 
 def execute_trade(target_leverage):
     """
-    Execute trades to achieve target leverage.
-    Uses SPY for 1x, SSO for 2x exposure.
+    Execute trades to achieve target leverage using the Alpaca API.
+    Uses SPY for 1x exposure and SSO for 2x exposure.
+
+    Args:
+        target_leverage (float): The desired portfolio leverage (0.0, 1.0, 1.5, or 2.0).
     """
     if not ALPACA_INSTALLED:
         print("Alpaca not installed - cannot execute trades")

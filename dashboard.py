@@ -65,7 +65,15 @@ def load_data(ticker='SPY', period='2y'):
 
 @st.cache_data(ttl=300)
 def load_intl_data(period='2y'):
-    """Load international equity data for Dual Momentum."""
+    """
+    Load international equity data for Dual Momentum.
+
+    Args:
+        period (str): Data lookback period (e.g., '2y').
+
+    Returns:
+        pd.DataFrame: International market data.
+    """
     try:
         data = yf.download('VEU', period=period, progress=False)  # Vanguard FTSE All-World ex-US
         if data is None or len(data) == 0:
@@ -140,7 +148,15 @@ def load_sector_data():
     return results
 
 def get_signals(row):
-    """Calculate all 5 original signals for a given row."""
+    """
+    Calculate all 5 original signals for a given row.
+
+    Args:
+        row (pd.Series): Data row containing prices and indicators.
+
+    Returns:
+        dict: Boolean signals (Trend Filter, Golden Cross, etc.).
+    """
     signals = {
         'Trend Filter': (row['Close'] > row['MA50']) and (row['MA200_Slope'] > 0),
         'Golden Cross': row['MA50'] > row['MA200'],
@@ -151,7 +167,18 @@ def get_signals(row):
     return signals
 
 def get_strategy_position(signals, row=None, intl_mom=None, rsi_in_state=None):
-    """Get position for each strategy based on signals."""
+    """
+    Get position for each strategy based on signals.
+
+    Args:
+        signals (dict): Boolean signals for the current market state.
+        row (pd.Series, optional): Current data row for extra metrics.
+        intl_mom (float, optional): International momentum value.
+        rsi_in_state (bool, optional): State of RSI position.
+
+    Returns:
+        tuple: (positions dict, signal_count int)
+    """
     count = sum(signals.values())
     tf = signals['Trend Filter']
     gc = signals['Golden Cross']
@@ -240,7 +267,19 @@ def get_strategy_position(signals, row=None, intl_mom=None, rsi_in_state=None):
 # ============================================================
 
 def run_backtest(data, strategy_name, initial_capital=100000, intl_data=None, bond_data=None):
-    """Run backtest for a specific strategy."""
+    """
+    Run backtest for a specific strategy.
+
+    Args:
+        data (pd.DataFrame): Historical price data.
+        strategy_name (str): Name of the strategy to backtest.
+        initial_capital (float): Starting balance.
+        intl_data (pd.DataFrame, optional): International market data.
+        bond_data (pd.DataFrame, optional): Bond market data.
+
+    Returns:
+        tuple: (result DataFrame, metrics dict)
+    """
     df = data.copy()
     df = df.dropna(subset=['Close', 'MA200'])
     

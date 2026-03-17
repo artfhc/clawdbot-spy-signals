@@ -9,7 +9,15 @@ import pandas as pd
 from datetime import datetime
 
 def get_signals(ticker='SPY'):
-    """Calculate all signals and return position for all 5 strategies."""
+    """
+    Calculate all signals and return position for all 5 strategies.
+
+    Args:
+        ticker (str): The stock ticker to analyze (default is 'SPY').
+
+    Returns:
+        dict: A dictionary containing price data, signals, and strategy positions.
+    """
     
     # Fetch data
     data = yf.download(ticker, period='1y', progress=False)

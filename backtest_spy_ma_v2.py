@@ -78,6 +78,16 @@ spy['Strategy_3_Cum'] = (1 + spy['Strategy_3_Return']).cumprod()
 
 # Calculate metrics function
 def calculate_metrics(returns, name):
+    """
+    Calculate performance metrics for a specific strategy return series.
+
+    Args:
+        returns (pd.Series): Daily strategy returns.
+        name (str): Name of the strategy for identification.
+
+    Returns:
+        dict: Performance metrics (total return, annualized return, volatility, Sharpe, Max Drawdown).
+    """
     returns = returns.dropna()
     cumulative = (1 + returns).cumprod()
     total_return = cumulative.iloc[-1] - 1

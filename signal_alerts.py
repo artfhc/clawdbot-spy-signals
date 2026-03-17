@@ -129,14 +129,25 @@ def get_all_signals(spy, veu):
     return signals, float(row['Close'])
 
 def load_previous_state():
-    """Load previous signal state."""
+    """
+    Load the previous signal state from the state file.
+
+    Returns:
+        dict: The previously saved signal state, or an empty dict if the file doesn't exist.
+    """
     if STATE_FILE.exists():
         with open(STATE_FILE, 'r') as f:
             return json.load(f)
     return {}
 
 def save_state(signals, price):
-    """Save current signal state."""
+    """
+    Save the current signal state to the state file.
+
+    Args:
+        signals (dict): Current strategy signals.
+        price (float): Current asset price.
+    """
     state = {
         'date': datetime.now().strftime('%Y-%m-%d'),
         'price': price,
