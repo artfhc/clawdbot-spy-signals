@@ -21,27 +21,26 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
-def check_alpaca_installed() -> bool:
+def check_alpaca_installed():
     """
     Check if alpaca-trade-api is installed.
-
+    
     Returns:
         bool: True if installed, False otherwise.
     """
     try:
         from alpaca.trading.client import TradingClient
         return True
-    except ImportError as e:
-        print(f"Error: {e}")
+    except ImportError:
         return False
 
-def get_signal_conservative(ticker: str = 'SPY') -> tuple[float, int]:
+def get_signal_conservative(ticker='SPY'):
     """
     Get Conservative strategy signal (D).
-
+    
     Parameters:
         ticker (str): Stock ticker symbol (default: 'SPY')
-
+    
     Returns:
         tuple: Signal value (0.0, 1.0, 1.5, 2.0) and signal count (int)
     """
@@ -50,34 +49,29 @@ def get_signal_conservative(ticker: str = 'SPY') -> tuple[float, int]:
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
     
-    # Calculate moving averages
     data['MA20'] = data['Close'].rolling(20).mean()
     data['MA50'] = data['Close'].rolling(50).mean()
     data['MA200'] = data['Close'].rolling(200).mean()
+    data['MA200_Slope'] = data['MA200'].pct_change(periods=20)
     
-    # Calculate RSI and volatility
     delta = data['Close'].diff()
     gain = delta.where(delta > 0, 0).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     data['RSI'] = 100 - (100 / (1 + gain/loss))
     data['Vol'] = data['Close'].pct_change().rolling(20).std() * (252 ** 0.5)
     
-    # Get latest data
     latest = data.iloc[-1]
     
-    # Define signals
     signals = [
-        (latest['Close'] > latest['MA50']) and (latest['MA200'].pct_change(periods=20) > 0),
+        (latest['Close'] > latest['MA50']) and (latest['MA200_Slope'] > 0),
         latest['MA50'] > latest['MA200'],
         latest['Close'] > latest['MA20'],
         latest['RSI'] < 70,
         latest['Vol'] < 0.25
     ]
     
-    # Count signals
     count = sum(signals)
     
-    # Determine signal value
     if count == 5:
         return 2.0, count
     elif count >= 4:
@@ -87,31 +81,27 @@ def get_signal_conservative(ticker: str = 'SPY') -> tuple[float, int]:
     else:
         return 0.0, count
 
-def get_account_info(client: TradingClient) -> dict:
+def get_account_info(client):
     """
     Get account information from Alpaca API.
-
+    
     Parameters:
         client (TradingClient): Alpaca trading client
-
+    
     Returns:
         dict: Account information
     """
-    try:
-        account = client.get_account()
-        return account
-    except Exception as e:
-        print(f"Error: {e}")
-        return {}
+    account = client.get_account()
+    return account
 
-def calculate_target_allocations(equity: float, target_leverage: float) -> tuple[float, float]:
+def calculate_target_allocations(equity, target_leverage):
     """
     Calculate target allocations for SPY and SSO.
-
+    
     Parameters:
         equity (float): Account equity
         target_leverage (float): Target leverage (0.0, 1.0, 1.5, 2.0)
-
+    
     Returns:
         tuple: Target SPY and SSO allocations
     """
@@ -134,10 +124,10 @@ def calculate_target_allocations(equity: float, target_leverage: float) -> tuple
     
     return target_spy, target_sso
 
-def execute_trade(client: TradingClient, target_leverage: float) -> None:
+def execute_trade(client, target_leverage):
     """
     Execute trades to achieve target leverage.
-
+    
     Parameters:
         client (TradingClient): Alpaca trading client
         target_leverage (float): Target leverage (0.0, 1.0, 1.5, 2.0)
@@ -191,7 +181,7 @@ def execute_trade(client: TradingClient, target_leverage: float) -> None:
     print("\n⚠️  Trade execution is SIMULATED")
     print("   Enable live trading only after extensive paper trading!")
 
-def main() -> None:
+def main():
     print("=" * 60)
     print("🤖 ALPACA AUTO-TRADER - Conservative Strategy")
     print(f"   {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
