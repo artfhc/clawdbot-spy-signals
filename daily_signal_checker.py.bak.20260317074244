@@ -8,73 +8,32 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 
-def fetch_data(ticker: str = 'SPY', period: str = '1y', progress: bool = False) -> pd.DataFrame:
-    """
-    Fetch historical data for the specified ticker.
-
-    Args:
-    - ticker (str): The ticker symbol to fetch data for. Defaults to 'SPY'.
-    - period (str): The time period to fetch data for. Defaults to '1y'.
-    - progress (bool): Whether to display a progress bar. Defaults to False.
-
-    Returns:
-    - pd.DataFrame: The fetched historical data.
-    """
-    try:
-        data = yf.download(ticker, period=period, progress=progress)
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
-        return data
-    except Exception as e:
-        print(f"Error fetching data: {e}")
-        return None
-
-def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculate the necessary indicators for the trading strategies.
-
-    Args:
-    - data (pd.DataFrame): The historical data.
-
-    Returns:
-    - pd.DataFrame: The data with the calculated indicators.
-    """
-    try:
-        data['MA20'] = data['Close'].rolling(20).mean()
-        data['MA50'] = data['Close'].rolling(50).mean()
-        data['MA200'] = data['Close'].rolling(200).mean()
-        data['MA200_Slope'] = data['MA200'].pct_change(periods=20)
-        
-        delta = data['Close'].diff()
-        gain = delta.where(delta > 0, 0).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss
-        data['RSI'] = 100 - (100 / (1 + rs))
-        
-        data['Vol'] = data['Close'].pct_change().rolling(20).std() * (252 ** 0.5)
-        return data
-    except Exception as e:
-        print(f"Error calculating indicators: {e}")
-        return None
-
-def get_signals(ticker: str = 'SPY') -> dict:
-    """
-    Calculate all signals and return position for all 5 strategies.
-
-    Args:
-    - ticker (str): The ticker symbol to fetch data for. Defaults to 'SPY'.
-
-    Returns:
-    - dict: The trading signals and positions.
-    """
-    data = fetch_data(ticker)
-    if data is None:
-        return {}
+def get_signals(ticker='SPY'):
+    """Calculate all signals and return position for all 5 strategies."""
     
-    data = calculate_indicators(data)
-    if data is None:
-        return {}
+    # Fetch data
+    data = yf.download(ticker, period='1y', progress=False)
     
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
+    
+    # Calculate indicators
+    data['MA20'] = data['Close'].rolling(20).mean()
+    data['MA50'] = data['Close'].rolling(50).mean()
+    data['MA200'] = data['Close'].rolling(200).mean()
+    data['MA200_Slope'] = data['MA200'].pct_change(periods=20)
+    
+    # RSI
+    delta = data['Close'].diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    data['RSI'] = 100 - (100 / (1 + rs))
+    
+    # Volatility
+    data['Vol'] = data['Close'].pct_change().rolling(20).std() * (252 ** 0.5)
+    
+    # Get latest values
     latest = data.iloc[-1]
     price = latest['Close']
     ma20 = latest['MA20']
@@ -84,6 +43,7 @@ def get_signals(ticker: str = 'SPY') -> dict:
     rsi = latest['RSI']
     vol = latest['Vol']
     
+    # Calculate 5 base signals
     sig_trend = (price > ma50) and (ma200_slope > 0)
     sig_golden = ma50 > ma200
     sig_momentum = price > ma20
@@ -92,15 +52,21 @@ def get_signals(ticker: str = 'SPY') -> dict:
     
     signal_count = sum([sig_trend, sig_golden, sig_momentum, sig_rsi, sig_lowvol])
     
+    # ============================================================
+    # ALL 5 STRATEGIES
+    # ============================================================
+    
     strategies = {}
     
     # Strategy A: Trend Filter
+    # Long when price > 50 DMA AND 200 DMA slope positive
     if sig_trend:
         strategies['A'] = {'position': 1.0, 'action': 'LONG 1x', 'etf': 'SPY'}
     else:
         strategies['A'] = {'position': 0.0, 'action': 'CASH', 'etf': 'SGOV/BIL'}
     
     # Strategy B: TF + Golden Cross Leverage
+    # 1x when Trend Filter, 1.5x when Golden Cross also active
     if sig_trend:
         if sig_golden:
             strategies['B'] = {'position': 1.5, 'action': 'LONG 1.5x', 'etf': '50% SPY + 50% SSO'}
@@ -110,6 +76,7 @@ def get_signals(ticker: str = 'SPY') -> dict:
         strategies['B'] = {'position': 0.0, 'action': 'CASH', 'etf': 'SGOV/BIL'}
     
     # Strategy C: Signal Stack
+    # 1x base (requires Trend Filter), 1.5x with 4 signals, 2x with 5 signals
     if sig_trend:
         if signal_count == 5:
             strategies['C'] = {'position': 2.0, 'action': 'LONG 2x', 'etf': 'SSO'}
@@ -121,6 +88,7 @@ def get_signals(ticker: str = 'SPY') -> dict:
         strategies['C'] = {'position': 0.0, 'action': 'CASH', 'etf': 'SGOV/BIL'}
     
     # Strategy D: Conservative
+    # Requires 3+ signals to enter; scales 1x→1.5x→2x
     if signal_count == 5:
         strategies['D'] = {'position': 2.0, 'action': 'LONG 2x', 'etf': 'SSO'}
     elif signal_count >= 4:
@@ -131,6 +99,7 @@ def get_signals(ticker: str = 'SPY') -> dict:
         strategies['D'] = {'position': 0.0, 'action': 'CASH', 'etf': 'SGOV/BIL'}
     
     # Strategy E: Aggressive
+    # 1x Trend Filter, 2x when TF + Golden Cross + Momentum align
     if sig_trend:
         if sig_golden and sig_momentum:
             strategies['E'] = {'position': 2.0, 'action': 'LONG 2x', 'etf': 'SSO'}
@@ -160,13 +129,9 @@ def get_signals(ticker: str = 'SPY') -> dict:
         'strategies': strategies
     }
 
-def print_report(result: dict) -> None:
-    """
-    Print formatted daily report with all 5 strategies.
-
-    Args:
-    - result (dict): The trading signals and positions.
-    """
+def print_report(result):
+    """Print formatted daily report with all 5 strategies."""
+    
     print("=" * 55)
     print(f"📊 DAILY TRADING SIGNALS - ALL 5 STRATEGIES")
     print(f"   {result['ticker']} | {result['date']}")
@@ -211,3 +176,81 @@ def print_report(result: dict) -> None:
     }
     
     strategy_desc = {
+        'A': 'Long when Price>50DMA & 200DMA rising',
+        'B': '1x base, 1.5x when Golden Cross adds',
+        'C': '1x→1.5x→2x based on signal count',
+        'D': 'Requires 3+ signals; best risk-adjusted',
+        'E': '2x when Trend+Cross+Momentum align'
+    }
+    
+    for key in ['A', 'B', 'C', 'D', 'E']:
+        s = result['strategies'][key]
+        name = strategy_names[key]
+        desc = strategy_desc[key]
+        
+        # Position emoji
+        if s['position'] == 0:
+            pos_icon = "🔴"
+        elif s['position'] == 1.0:
+            pos_icon = "🟢"
+        elif s['position'] == 1.5:
+            pos_icon = "🟡"
+        else:
+            pos_icon = "🔥"
+        
+        print()
+        print(f"{pos_icon} Strategy {key}: {name}")
+        print(f"   {desc}")
+        print(f"   ➤ Position: {s['action']}")
+        print(f"   ➤ ETF: {s['etf']}")
+    
+    print()
+    print("=" * 55)
+    print("💡 QUICK REFERENCE")
+    print("=" * 55)
+    print("   CASH    = SGOV, BIL, or money market")
+    print("   1x      = 100% SPY")
+    print("   1.5x    = 50% SPY + 50% SSO")
+    print("   2x      = 100% SSO")
+    print()
+
+def print_mobile_summary(result):
+    """Print compact mobile-friendly summary."""
+    
+    print(f"📊 SPY Signals | {result['date']}")
+    print(f"Price: ${result['price']:.2f}")
+    print()
+    
+    # Signals one-liner
+    sigs = result['signals']
+    sig_str = ""
+    sig_str += "✅" if sigs['1. Trend Filter'] else "❌"
+    sig_str += "✅" if sigs['2. Golden Cross'] else "❌"
+    sig_str += "✅" if sigs['3. Momentum'] else "❌"
+    sig_str += "✅" if sigs['4. RSI OK'] else "❌"
+    sig_str += "✅" if sigs['5. Low Vol'] else "❌"
+    print(f"Signals: {sig_str} ({result['signal_count']}/5)")
+    print()
+    
+    print("Strategy Positions:")
+    for key in ['A', 'B', 'C', 'D', 'E']:
+        s = result['strategies'][key]
+        star = "⭐" if key == 'D' else ""
+        print(f"  {key}: {s['action']:<10} {star}")
+    
+    print()
+    # Highlight recommended (D)
+    d = result['strategies']['D']
+    print(f"💡 Recommended (D): {d['action']}")
+    print(f"   Buy: {d['etf']}")
+
+if __name__ == "__main__":
+    import sys
+    
+    result = get_signals('SPY')
+    
+    # Check for --mobile flag
+    if len(sys.argv) > 1 and sys.argv[1] == '--mobile':
+        print_mobile_summary(result)
+    else:
+        print_report(result)

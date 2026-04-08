@@ -81,9 +81,9 @@ def calculate_signals(spy: pd.DataFrame) -> pd.DataFrame:
     spy['Sig_LowVol'] = (spy['Volatility'] < 0.25).astype(int)
     return spy
 
-def get_strategy_position(spy: pd.DataFrame) -> pd.DataFrame:
+def calculate_positions(spy: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculate positions for each strategy.
+    Calculate positions.
 
     Args:
         spy (pd.DataFrame): SPY data with signals.
@@ -96,6 +96,9 @@ def get_strategy_position(spy: pd.DataFrame) -> pd.DataFrame:
     # Calculate position B (trend filter + golden cross leverage)
     spy['Position_B'] = spy['Sig_TrendFilter'] * 1.0
     spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Sig_GoldenCross'] == 1), 'Position_B'] = 1.5
+    # Calculate signal count
+    spy['Signal_Count'] = (spy['Sig_TrendFilter'] + spy['Sig_GoldenCross'] + 
+                           spy['Sig_Momentum'] + spy['Sig_RSI_OK'] + spy['Sig_LowVol'])
     # Calculate position C (signal stack)
     spy['Position_C'] = 0.0
     spy.loc[spy['Sig_TrendFilter'] == 1, 'Position_C'] = 1.0
@@ -153,15 +156,4 @@ def get_strategy_position(spy: pd.DataFrame) -> pd.DataFrame:
     spy['Position_P'] = 0.0
     spy.loc[spy['Signal_Count'] >= 3, 'Position_P'] = 1.0
     spy.loc[spy['Signal_Count'] >= 4, 'Position_P'] = 1.5
-    spy.loc[spy['Signal_Count'] == 5, 'Position_P'] = 2.0
-
-def calculate_positions(spy: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculate positions.
-
-    Args:
-        spy (pd.DataFrame): SPY data with signals.
-
-    Returns:
-        pd.DataFrame: SPY data with positions.
-   
+    spy.loc[spy['Signal_Count'] == 5, 'Position_P'] = 2
