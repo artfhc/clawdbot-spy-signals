@@ -14,7 +14,7 @@ from pathlib import Path
 # Define constants
 STATE_FILE = Path(__file__).parent / "signal_state.json"
 
-def load_market_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+def load_market_data():
     """
     Load SPY and international data.
 
@@ -30,7 +30,7 @@ def load_market_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 
     return spy, veu
 
-def calculate_indicators(spy: pd.DataFrame) -> pd.DataFrame:
+def calculate_indicators(spy):
     """
     Calculate indicators for SPY data.
 
@@ -65,7 +65,7 @@ def calculate_indicators(spy: pd.DataFrame) -> pd.DataFrame:
 
     return spy
 
-def get_all_signals(spy: pd.DataFrame, veu: pd.DataFrame) -> tuple[dict, float]:
+def get_all_signals(spy, veu):
     """
     Get current signals for all strategies.
 
@@ -157,7 +157,7 @@ def get_all_signals(spy: pd.DataFrame, veu: pd.DataFrame) -> tuple[dict, float]:
 
     return signals, float(row['Close'])
 
-def load_previous_state() -> dict:
+def load_previous_state():
     """
     Load previous signal state.
 
@@ -165,15 +165,11 @@ def load_previous_state() -> dict:
         dict: previous signal state.
     """
     if STATE_FILE.exists():
-        try:
-            with open(STATE_FILE, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError as e:
-            print(f"Error loading previous state: {e}")
-            return {}
+        with open(STATE_FILE, 'r') as f:
+            return json.load(f)
     return {}
 
-def save_state(signals: dict, price: float) -> None:
+def save_state(signals, price):
     """
     Save current signal state.
 
@@ -189,7 +185,7 @@ def save_state(signals: dict, price: float) -> None:
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f, indent=2)
 
-def detect_changes(old_signals: dict, new_signals: dict) -> list:
+def detect_changes(old_signals, new_signals):
     """
     Detect which signals have changed.
 
@@ -211,7 +207,7 @@ def detect_changes(old_signals: dict, new_signals: dict) -> list:
             })
     return changes
 
-def main() -> None:
+def main():
     print("Loading market data...")
     spy, veu = load_market_data()
 
@@ -243,4 +239,10 @@ def main() -> None:
     else:
         print("\n✅ No signal changes since last check.")
 
-    print("\n📋
+    print("\n📋 CURRENT SIGNALS:")
+    for strategy, signal in current_signals.items():
+        emoji = '🟢' if 'LONG' in signal or 'BUY' in signal else '⚪'
+        print(f"  {emoji} {strategy}: {signal}")
+
+    # Return changes for external use (e.g., alerting)
+    return changes, current_signals, price

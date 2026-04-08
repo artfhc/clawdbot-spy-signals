@@ -1,4 +1,3 @@
-```python
 #!/usr/bin/env python3
 """
 SPY Combined Strategy with Dynamic Leverage
@@ -39,20 +38,17 @@ def calculate_indicators(spy: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: SPY data with indicators.
     """
-    # Calculate moving averages
     spy['MA20'] = spy['Close'].rolling(window=20).mean()
     spy['MA50'] = spy['Close'].rolling(window=50).mean()
     spy['MA200'] = spy['Close'].rolling(window=200).mean()
     spy['MA200_Slope'] = spy['MA200'].pct_change(periods=20)
 
-    # Calculate RSI
     delta = spy['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     spy['RSI'] = 100 - (100 / (1 + rs))
 
-    # Calculate volatility
     spy['Volatility'] = spy['Close'].pct_change().rolling(window=20).std() * np.sqrt(252)
     spy = spy.dropna()
     ten_years_ago = end_date - timedelta(days=365*10)
@@ -69,15 +65,10 @@ def calculate_signals(spy: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: SPY data with signals.
     """
-    # Calculate trend filter signal
     spy['Sig_TrendFilter'] = ((spy['Close'] > spy['MA50']) & (spy['MA200_Slope'] > 0)).astype(int)
-    # Calculate golden cross signal
     spy['Sig_GoldenCross'] = (spy['MA50'] > spy['MA200']).astype(int)
-    # Calculate momentum signal
     spy['Sig_Momentum'] = (spy['Close'] > spy['MA20']).astype(int)
-    # Calculate RSI signal
     spy['Sig_RSI_OK'] = (spy['RSI'] < 70).astype(int)
-    # Calculate low volatility signal
     spy['Sig_LowVol'] = (spy['Volatility'] < 0.25).astype(int)
     return spy
 
@@ -91,25 +82,19 @@ def calculate_positions(spy: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: SPY data with positions.
     """
-    # Calculate position A (trend filter)
     spy['Position_A'] = spy['Sig_TrendFilter']
-    # Calculate position B (trend filter + golden cross leverage)
     spy['Position_B'] = spy['Sig_TrendFilter'] * 1.0
     spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Sig_GoldenCross'] == 1), 'Position_B'] = 1.5
-    # Calculate signal count
     spy['Signal_Count'] = (spy['Sig_TrendFilter'] + spy['Sig_GoldenCross'] + 
                            spy['Sig_Momentum'] + spy['Sig_RSI_OK'] + spy['Sig_LowVol'])
-    # Calculate position C (signal stack)
     spy['Position_C'] = 0.0
     spy.loc[spy['Sig_TrendFilter'] == 1, 'Position_C'] = 1.0
     spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Signal_Count'] >= 4), 'Position_C'] = 1.5
     spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Signal_Count'] == 5), 'Position_C'] = 2.0
-    # Calculate position D (conservative)
     spy['Position_D'] = 0.0
     spy.loc[spy['Signal_Count'] >= 3, 'Position_D'] = 1.0
     spy.loc[spy['Signal_Count'] >= 4, 'Position_D'] = 1.5
     spy.loc[spy['Signal_Count'] == 5, 'Position_D'] = 2.0
-    # Calculate position E (aggressive)
     spy['Position_E'] = spy['Sig_TrendFilter'] * 1.0
     spy.loc[(spy['Sig_TrendFilter'] == 1) & (spy['Sig_GoldenCross'] == 1) & 
             (spy['Sig_Momentum'] == 1), 'Position_E'] = 2.0
@@ -125,19 +110,12 @@ def calculate_returns(spy: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: SPY data with returns.
     """
-    # Calculate daily return
     spy['Daily_Return'] = spy['Close'].pct_change()
-    # Calculate return for buy and hold
     spy['Return_BH'] = spy['Daily_Return']
-    # Calculate return for position A
     spy['Return_A'] = spy['Position_A'].shift(1) * spy['Daily_Return']
-    # Calculate return for position B
     spy['Return_B'] = spy['Position_B'].shift(1) * spy['Daily_Return']
-    # Calculate return for position C
     spy['Return_C'] = spy['Position_C'].shift(1) * spy['Daily_Return']
-    # Calculate return for position D
     spy['Return_D'] = spy['Position_D'].shift(1) * spy['Daily_Return']
-    # Calculate return for position E
     spy['Return_E'] = spy['Position_E'].shift(1) * spy['Daily_Return']
     return spy
 
@@ -166,30 +144,21 @@ def calculate_metrics(returns: pd.Series, positions: pd.Series = None) -> dict:
     Returns:
         dict: Metrics.
     """
-    # Drop NaN values
     returns = returns.dropna()
-    # Calculate cumulative returns
     cum = (1 + returns).cumprod()
-    # Calculate total return
     total = cum.iloc[-1] - 1
-    # Calculate years
     years = len(returns) / 252
-    # Calculate annual return
     ann_ret = (1 + total) ** (1/years) - 1
-    # Calculate volatility
     vol = returns.std() * np.sqrt(252)
-    # Calculate Sharpe ratio
     sharpe = ann_ret / vol if vol > 0 else 0
     
-    # Calculate maximum drawdown
     rolling_max = cum.cummax()
     dd = (cum - rolling_max) / rolling_max
     max_dd = dd.min()
     
-    # Calculate Calmar ratio
     calmar = abs(ann_ret / max_dd) if max_dd != 0 else 0
     
-    # Calculate average leverage if positions provided
+    # Average leverage if positions provided
     avg_lev = positions.mean() if positions is not None else 1.0
     
     return {
@@ -216,4 +185,18 @@ def main():
     metrics = {
         'Buy & Hold': calculate_metrics(spy['Return_BH']),
         'A: Trend Filter': calculate_metrics(spy['Return_A'], spy['Position_A']),
-        'B: TF + GC Lev
+        'B: TF + GC Lev': calculate_metrics(spy['Return_B'], spy['Position_B']),
+        'C: Signal Stack': calculate_metrics(spy['Return_C'], spy['Position_C']),
+        'D: Conservative': calculate_metrics(spy['Return_D'], spy['Position_D']),
+        'E: Aggressive': calculate_metrics(spy['Return_E'], spy['Position_E']),
+    }
+
+    print("=" * 95)
+    print("COMBINED STRATEGY BACKTEST: SPY with Dynamic Leverage")
+    print("=" * 95)
+    print()
+    print("STRATEGY DEFINITIONS:")
+    print("  A: Trend Filter      — 1x when price > 50 DMA AND 200 DMA slope positive")
+    print("  B: TF + GC Leverage  — 1x Trend Filter, 1.5x when Golden Cross also active")
+    print("  C: Signal Stack      — 1x base, 1.5x with 4 signals, 2x with all 5 signals")
+    print("  D: Conservative      — Requires
